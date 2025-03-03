@@ -1,0 +1,15 @@
+[submodule "cass"]
+	path = cass
+	url = git@github.com:eloqdata/cpp-driver.git
+[submodule "eloq_metrics"]
+	path = eloq_metrics
+	url = git@github.com:eloqdata/eloq-metrics.git
+[submodule "tx_service"]
+	path = tx_service
+	url = git@github.com:eloqdata/tx_service.git
+[submodule "crcspeed"]
+	path = crcspeed
+	url = https://github.com/mattsta/crcspeed
+[submodule "log_service"]
+	path = log_service
+	url = git@github.com:eloqdata/log_service.git
