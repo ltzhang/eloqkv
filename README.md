@@ -22,7 +22,9 @@ EloqKV is a **Redis-compatible database** designed for developers who need **ACI
 
 ## Key Features  
 
-### 🛠️ **ACID Transactions with SQL-Style Syntax**  
+### 🛠️ **ACID Transactions with SQL-Style Syntax**
+Besides the standard Redis transaction syntax (MULTI/EXEC), we also support SQL-style interactive transactions.
+
 ```redis  
 -- Transfer funds between accounts atomically  
 BEGIN  
