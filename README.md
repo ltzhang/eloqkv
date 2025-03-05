@@ -4,7 +4,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/eloqdata/eloqkv?style=social)](https://github.com/eloqdata/eloqkv/stargazers)
 ---
 
-## 1. Overview  
+## Overview  
 EloqKV is a **Redis-compatible database** designed for developers who need **ACID transactions, tiered storage, and SQL-style syntax** — all while keeping Redis' simplicity.  
 
 **Why Choose EloqKV Over Redis?**  
@@ -20,7 +20,7 @@ EloqKV is a **Redis-compatible database** designed for developers who need **ACI
 
 ---
 
-## 2. Key Features  
+## Key Features  
 
 ### 🛠️ **ACID Transactions with SQL-Style Syntax**  
 ```redis  
@@ -63,8 +63,10 @@ redis-cli -h eloqkv-server SET key "value"  # Works out of the box!
 
 ---
 
-## 3. Install with Docker  
-**1. Start a Single Node:**  
+## Quick Start with Docker
+We recommend using Docker for a quick start with the EloqKV service.
+
+**1. Start a Single Node using Docker:**  
 ```bash  
 # Create subnet for containers.
 docker network create --subnet=172.20.0.0/16 eloqnet
@@ -81,21 +83,42 @@ OK
 172.20.0.10:6379> get hello
 "world"
 ```  
+---
+
+## Run with EloqCtl
+EloqCtl is the cluster management tool for EloqKV.
+
+To deploy an EloqKV cluster in production, download [EloqCtl](https://www.eloqdata.com/downloadeloqctl) and follow the [deployment guide](https://www.eloqdata.com/eloqsql/cluster-deployment).
 
 ---
 
-## 4. Build from Source  
+## Run with Tarball
+Download the EloqKV tarball from the [EloqData website](https://www.eloqdata.com/download/eloqkv).
 
-### 1. Initialize Submodules
+Follow the [instruction guide](https://www.eloqdata.com/eloqkv/install-from-binary) to set up and run EloqKV on your local machine.
+
+---
+
+## Build from Source  
+
+### 1. Install Dependencies:
+We recommend using our Docker image with pre-installed dependencies for a quick build and run of EloqKV.
+
+```bash
+docker pull eloqdata/eloq-build-ubuntu2404:latest
+```
+
+Or, you can manually run the following script to install dependencies on your local machine.
+
+```bash
+bash scripts/install_dependency_ubuntu2404.sh
+```
+
+### 2. Initialize Submodules
 Fetch the Transaction Service and its dependencies:
 
 ```
 git submodule update --init --recursive
-```
-
-### 2. Install Dependencies:
-```bash
-bash scripts/install_dependency_ubuntu2404.sh
 ```
 
 ### 3. Build EloqKV
@@ -110,7 +133,7 @@ make install
 ### 4. Run EloqKV
 ```bash
 cd install
-./bin/eloqkv
+./bin/eloqkv --port=6389
 ```
 
 ---
