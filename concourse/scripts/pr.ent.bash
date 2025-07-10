@@ -30,80 +30,28 @@ pwd
 ls
 sudo chown -R mono $PWD
 
+ulimit -c unlimited
+echo '/tmp/core.%t.%e.%p' | sudo tee /proc/sys/kernel/core_pattern
 # make coredump dir writable.
 if [ ! -d "/var/crash" ]; then sudo mkdir -p /var/crash; fi
 sudo chmod 777 /var/crash
 
-cd $WORKSPACE/redis_pr
+cd $WORKSPACE/eloqkv_pr
 pr_branch_name=$(cat .git/resource/metadata.json | jq -r '.[] | select(.name=="head_name") | .value')
 sudo chown -R mono /home/mono/workspace
-cd /home/mono/workspace/
+cd /home/mono/workspace
+ln -s $WORKSPACE/eloqkv_pr eloqkv
+ln -s $WORKSPACE/eloq_test_src eloq_test
 
-ln -s $WORKSPACE/redis_src eloqkv
 cd eloqkv
-set +e
-git fetch origin '+refs/heads/*:refs/remotes/origin/*'
-redis_branch=$(git branch -a | grep "remotes/origin/${pr_branch_name}" | grep -v grep)
-set -e
-if [ -n "$redis_branch" ]; then git checkout -b ${pr_branch_name} origin/${pr_branch_name}; fi
+git config remote.origin.fetch "+refs/heads/${pr_branch_name}:refs/remotes/origin/${pr_branch_name}"
 git submodule sync
 git submodule update --init --recursive
 
 ln -s $WORKSPACE/logservice_src log_service
 
-cd tx_service
-set +e
-git fetch origin '+refs/heads/*:refs/remotes/origin/*'
-tx_branch=$(git branch -a | grep "remotes/origin/${pr_branch_name}" | grep -v grep)
-set -e
-if [ -n "$tx_branch" ]; then git checkout -b ${pr_branch_name} origin/${pr_branch_name}; fi
-
-cd tx-log-protos
-set +e
-git fetch origin '+refs/heads/*:refs/remotes/origin/*'
-tx_log_protos_branch=`git branch -a| grep "remotes/origin/${pr_branch_name}" | grep -v grep`
-set -e
-if [ -n "$tx_log_protos_branch" ]; then git checkout -b ${pr_branch_name} origin/${pr_branch_name}; fi
-cd ..
-
-cd /home/mono/workspace/eloqkv/log_service
-git fetch origin '+refs/heads/*:refs/remotes/origin/*'
-set +e
-log_branch=$(git branch -a | grep "remotes/origin/${pr_branch_name}" | grep -v grep)
-set -e
-if [ -n "$log_branch" ]; then git checkout -b ${pr_branch_name} origin/${pr_branch_name}; fi
-
-cd tx-log-protos
-set +e
-git fetch origin '+refs/heads/*:refs/remotes/origin/*'
-tx_log_protos_branch=`git branch -a| grep "remotes/origin/${pr_branch_name}" | grep -v grep`
-set -e
-if [ -n "$tx_log_protos_branch" ]; then git checkout -b ${pr_branch_name} origin/${pr_branch_name}; fi
-cd ..
-
-cd /home/mono/workspace/eloqkv/store_handler
-set +e
-git fetch origin '+refs/heads/*:refs/remotes/origin/*'
-store_handler_branch=$(git branch -a | grep "remotes/origin/${pr_branch_name}" | grep -v grep)
-set -e
-if [ -n "$store_handler_branch" ]; then git checkout -b ${pr_branch_name} origin/${pr_branch_name}; fi
-
-
-cd /home/mono/workspace/eloqkv/eloq_metrics
-git fetch origin '+refs/heads/*:refs/remotes/origin/*'
-set +e
-eloq_metrics_branch=$(git branch -a | grep "remotes/origin/${pr_branch_name}" | grep -v grep)
-set -e
-if [ -n "$eloq_metrics_branch" ]; then git checkout -b ${pr_branch_name} origin/${pr_branch_name}; fi
-
-cd /home/mono/workspace/
-ln -s $WORKSPACE/eloq_test_src eloq_test
-cd /home/mono/workspace/eloq_test/
-set +e
-git fetch origin '+refs/heads/*:refs/remotes/origin/*'
-eloq_test_branch=$(git branch -a | grep "remotes/origin/${pr_branch_name}" | grep -v grep)
-if [ -n "$eloq_test_branch" ]; then git checkout -b ${pr_branch_name} origin/${pr_branch_name}; fi
-set -e
+cd /home/mono/workspace/eloqkv/tx_service
+ln -s $WORKSPACE/raft_host_manager_src raft_host_manager
 
 cd /home/mono/workspace/eloqkv
 
@@ -114,10 +62,8 @@ else
   echo "fail to get cmake version"
 fi
 
-
 sudo apt-get update
-sudo apt install apt-utils -y
-sudo apt install python3-venv -y
+sudo apt install python3.8-venv -y
 
 # todo: move these code to docker-image
 sudo apt install openssh-server -y
@@ -135,10 +81,11 @@ build_types=("Debug")
 # kv_store_types=("CASSANDRA" "ROCKSDB")
 kv_store_types=("ELOQDSS_ROCKSDB_CLOUD_S3" "ROCKSDB")
 
+
 for bt in "${build_types[@]}"; do
   for kst in "${kv_store_types[@]}"; do
     rm -rf /home/mono/workspace/eloqkv/eloq_data
-    run_build $bt $kst
+    run_build_ent $bt $kst
 
     source my_env/bin/activate
     run_eloq_test $bt $kst
@@ -155,7 +102,20 @@ done
 # pip install -r /home/mono/workspace/eloq_test/py_requirements.txt
 # rm -rf /home/mono/workspace/eloqkv/eloq_data
 # run_build "Debug" "ROCKSDB"
+# #                       testcase enable_wal enable_data_store
+# run_eloq_ttl_tests TestsWithMem true true rocksdb
 # run_eloq_ttl_tests TestsWithKV true true rocksdb
+# run_eloq_ttl_tests TestsWithLog true true rocksdb
+# run_eloq_ttl_tests TestsWithMem false true rocksdb
+# run_eloq_ttl_tests TestsWithKV false true rocksdb
+# run_eloq_ttl_tests TestsWithMem false false rocksdb
+
 # # run_build "Debug" "CASSANDRA"
-# # run_eloq_ttl_tests TestsWithLog true true cassandra
+# # #                       testcase enable_wal enable_data_store
+# # run_eloq_ttl_tests TestsWithMem true true cassandra $CASS_HOST
+# # run_eloq_ttl_tests TestsWithKV true true cassandra $CASS_HOST
+# # run_eloq_ttl_tests TestsWithLog true true cassandra $CASS_HOST
+# # run_eloq_ttl_tests TestsWithMem false true cassandra $CASS_HOST
+# # run_eloq_ttl_tests TestsWithKV false true cassandra $CASS_HOST
+# # run_eloq_ttl_tests TestsWithMem false false cassandra $CASS_HOST
 # deactivate

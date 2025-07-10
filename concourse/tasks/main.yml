@@ -8,5 +8,5 @@ inputs:
   - name: redis_src
   - name: eloq_test_src
 run:
-  path: redis_src/concourse/scripts/compile_test_main.bash
+  path: redis_src/concourse/scripts/main.bash
   args: ["((cass-host))", "((minio-endpoint))", "((minio-access-key))", "((minio-secret-key))"] 
