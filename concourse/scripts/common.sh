@@ -2867,7 +2867,7 @@ function run_eloq_test(){
     # python3 redis_test/ttl_test/ttl_test_with_kv.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
     # python3 redis_test/ttl_test/ttl_test_with_wal.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
 
-  elif [[ $kv_store_type = "ROCKSDB" ]]; then
+#  elif [[ $kv_store_type = "ROCKSDB" ]]; then
 #    python3 redis_test/standby_test/test_without_kv.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
 #    rm -rf runtime/*
 #    sleep 1
