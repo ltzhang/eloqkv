@@ -191,7 +191,7 @@ git submodule update --init --recursive
 ```bash
 mkdir build
 cd build
-cmake -DCMAKE_INSTALL_PREFIX=./install -DWITH_KV_STORE=ROCKSDB ..
+cmake -DCMAKE_INSTALL_PREFIX=./install ..
 make -j
 make install
 ```

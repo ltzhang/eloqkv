@@ -11,7 +11,7 @@ resources:
     type: git
     check_every: 3m
     source:
-      branch: merge
+      branch: main
       uri: git@github.com:eloqdata/eloqkv.git
       private_key: ((git-key))
 
@@ -68,7 +68,7 @@ jobs:
             - get: mono_ubuntu_2004
       - task: compile-test-task
         image: mono_ubuntu_2004
-        file: redis_src/concourse/tasks/compile_test_main.yml
+        file: redis_src/concourse/tasks/main.yml
         vars:
           cass-host: ((cassandra-host))
           minio-access-key: ((minio-access-key))

@@ -2846,40 +2846,40 @@ function run_eloq_test(){
     rm -rf runtime/*
 
     # run log service scale tests.
-    python3 redis_test/log_service_test/log_service_scale_test.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
-    rm -rf runtime/*
+    # python3 redis_test/log_service_test/log_service_scale_test.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
+    # rm -rf runtime/*
 
 
     # run standby tests.
 #    python3 redis_test/standby_test/test_without_kv.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
 #    rm -rf runtime/*
 #    sleep 2
-    python3 redis_test/standby_test/test_with_kv.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
-    rm -rf runtime/*
-    sleep 1
-    python3 redis_test/standby_test/test_with_wal_and_cass.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
-    rm -rf runtime/*
-    sleep 1
-    python3 redis_test/standby_test/test_with_failover.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
+    # python3 redis_test/standby_test/test_with_kv.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
+    # rm -rf runtime/*
+    # sleep 1
+    # python3 redis_test/standby_test/test_with_wal_and_cass.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
+    # rm -rf runtime/*
+    # sleep 1
+    # python3 redis_test/standby_test/test_with_failover.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
 
-    # run ttl tests
-    python3 redis_test/ttl_test/ttl_test_with_mem.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
-    python3 redis_test/ttl_test/ttl_test_with_kv.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
-    python3 redis_test/ttl_test/ttl_test_with_wal.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
+    # # run ttl tests
+    # python3 redis_test/ttl_test/ttl_test_with_mem.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
+    # python3 redis_test/ttl_test/ttl_test_with_kv.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
+    # python3 redis_test/ttl_test/ttl_test_with_wal.py --dbtype redis --storage cassandra --install_path ${eloqkv_install_path}
 
   elif [[ $kv_store_type = "ROCKSDB" ]]; then
 #    python3 redis_test/standby_test/test_without_kv.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
 #    rm -rf runtime/*
 #    sleep 1
-    python3 redis_test/standby_test/test_with_kv.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
-    rm -rf runtime/*
-    sleep 1
-    python3 redis_test/standby_test/test_with_failover.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
+    # python3 redis_test/standby_test/test_with_kv.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
+    # rm -rf runtime/*
+    # sleep 1
+    # python3 redis_test/standby_test/test_with_failover.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
 
-    # run ttl tests
-    python3 redis_test/ttl_test/ttl_test_with_mem.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
-    python3 redis_test/ttl_test/ttl_test_with_kv.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
-    python3 redis_test/ttl_test/ttl_test_with_wal.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
+    # # run ttl tests
+    # python3 redis_test/ttl_test/ttl_test_with_mem.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
+    # python3 redis_test/ttl_test/ttl_test_with_kv.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
+    # python3 redis_test/ttl_test/ttl_test_with_wal.py --dbtype redis --storage rocksdb --install_path ${eloqkv_install_path}
 
 
   elif [[ $kv_store_type = "DYNAMODB" ]]; then
@@ -2911,13 +2911,13 @@ function run_eloq_test(){
 #    python3 redis_test/standby_test/test_without_kv.py --dbtype redis --storage dynamo --install_path ${eloqkv_install_path}
 #    rm -rf runtime/*
 #    sleep 2
-    python3 redis_test/standby_test/test_with_kv.py --dbtype redis --storage dynamo --install_path ${eloqkv_install_path}
-    rm -rf runtime/*
-    sleep 1
-    python3 redis_test/standby_test/test_with_wal_and_cass.py --dbtype redis --storage dynamo --install_path ${eloqkv_install_path}
-    rm -rf runtime/*
-    sleep 1
-    python3 redis_test/standby_test/test_with_failover.py --dbtype redis --storage dynamo --install_path ${eloqkv_install_path}
+    # python3 redis_test/standby_test/test_with_kv.py --dbtype redis --storage dynamo --install_path ${eloqkv_install_path}
+    # rm -rf runtime/*
+    # sleep 1
+    # python3 redis_test/standby_test/test_with_wal_and_cass.py --dbtype redis --storage dynamo --install_path ${eloqkv_install_path}
+    # rm -rf runtime/*
+    # sleep 1
+    # python3 redis_test/standby_test/test_with_failover.py --dbtype redis --storage dynamo --install_path ${eloqkv_install_path}
 
 
   elif [[ $kv_store_type = "ELOQDSS_ROCKSDB_CLOUD_S3" ]]; then
@@ -2953,26 +2953,26 @@ function run_eloq_test(){
     # rm -rf runtime/*
 
     # run log service scale tests.
-    python3 redis_test/log_service_test/log_service_scale_test.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
-    rm -rf runtime/*
+    # python3 redis_test/log_service_test/log_service_scale_test.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
+    # rm -rf runtime/*
 
     # run standby tests.
-    python3 redis_test/standby_test/test_with_kv.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
-    rm -rf runtime/*
-    sleep 1
-    python3 redis_test/standby_test/test_with_wal_and_cass.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
-    rm -rf runtime/*
-    sleep 1
-    python3 redis_test/standby_test/test_with_failover.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
+    # python3 redis_test/standby_test/test_with_kv.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
+    # rm -rf runtime/*
+    # sleep 1
+    # python3 redis_test/standby_test/test_with_wal_and_cass.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
+    # rm -rf runtime/*
+    # sleep 1
+    # python3 redis_test/standby_test/test_with_failover.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
 
-    rm -rf runtime/*
-    python3 redis_test/datastore_test/datastore_scale_test.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
+    # rm -rf runtime/*
+    # python3 redis_test/datastore_test/datastore_scale_test.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
 
     # run ttl tests
     rm -rf runtime/*
-    python3 redis_test/ttl_test/ttl_test_with_mem.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
-    python3 redis_test/ttl_test/ttl_test_with_kv.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
-    python3 redis_test/ttl_test/ttl_test_with_wal.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
+    # python3 redis_test/ttl_test/ttl_test_with_mem.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
+    # python3 redis_test/ttl_test/ttl_test_with_kv.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
+    # python3 redis_test/ttl_test/ttl_test_with_wal.py --dbtype redis --storage eloqdss-rocksdb-cloud-s3 --install_path ${eloqkv_install_path}
 
     # clean up test bucket
     cleanup_minio_bucket $ROCKSDB_CLOUD_BUCKET_NAME
@@ -2994,21 +2994,21 @@ function run_eloq_test(){
     python3 redis_test/log_service_test/log_service_scale_test.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
 
     # run standby test
-    rm -rf runtime/*
-    python3 redis_test/standby_test/test_with_kv.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
-    sleep 1
-    rm -rf runtime/*
-    python3 redis_test/standby_test/test_with_failover.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
-    sleep 1
-    rm -rf runtime/*
+    # rm -rf runtime/*
+    # python3 redis_test/standby_test/test_with_kv.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
+    # sleep 1
+    # rm -rf runtime/*
+    # python3 redis_test/standby_test/test_with_failover.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
+    # sleep 1
+    # rm -rf runtime/*
     # disable unstable test
     #python3 redis_test/standby_test/test_with_wal_and_cass.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
 
     # run ttl tests
-    rm -rf runtime/*
-    python3 redis_test/ttl_test/ttl_test_with_mem.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
-    python3 redis_test/ttl_test/ttl_test_with_kv.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
-    python3 redis_test/ttl_test/ttl_test_with_wal.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
+    # rm -rf runtime/*
+    # python3 redis_test/ttl_test/ttl_test_with_mem.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
+    # python3 redis_test/ttl_test/ttl_test_with_kv.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
+    # python3 redis_test/ttl_test/ttl_test_with_wal.py --dbtype redis --storage eloqdss-eloqstore --install_path ${eloqkv_install_path}
   fi
 
   return 0

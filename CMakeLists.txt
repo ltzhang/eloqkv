@@ -53,7 +53,7 @@ option(WITH_ASAN "Enable memory sanitize" OFF)
 message(NOTICE "WITH ASAN: ${WITH_ASAN}")
 
 # KV data store backend for redis server, Cassandra, DynamoDB, RocksDB Cloud
-set(WITH_DATA_STORE "CASSANDRA" CACHE STRING "The KV data store for Monograph Redis")
+set(WITH_DATA_STORE "ROCKSDB" CACHE STRING "The KV data store for Monograph Redis")
 set_property(CACHE WITH_DATA_STORE PROPERTY STRINGS "CASSANDRA" "DYNAMODB" "ROCKSDB" "ROCKSDB_CLOUD_S3" "ROCKSDB_CLOUD_GCS" "ELOQDSS_ROCKSDB_CLOUD_S3" "ELOQDSS_ROCKSDB_CLOUD_GCS" "ELOQDSS_ELOQSTORE")
 message(NOTICE "With DATA_STORE: ${WITH_DATA_STORE}")
 
