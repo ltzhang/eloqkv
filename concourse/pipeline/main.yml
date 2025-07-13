@@ -31,12 +31,12 @@ resources:
       uri: git@github.com:eloqdata/eloq-metrics.git
       private_key: ((git-key))
 
-  - name: eloq_ubuntu_2404
+  - name: mono_ubuntu_2004
     type: registry-image
     source:
-      repository: eloqdata/eloq-build-ubuntu2404
+      repository: monographdb/monograph-dev-ci-ubuntu2004
       tag: latest
-      username: eloqdata
+      username: monographdb
       password: ((docker-secret-key))
 
 jobs:
@@ -55,9 +55,9 @@ jobs:
               trigger: true
             - get: eloq_test_src
               trigger: true
-            - get: eloq_ubuntu_2404
+            - get: mono_ubuntu_2004
       - task: compile-test-task
-        image: eloq_ubuntu_2404
+        image: mono_ubuntu_2004
         file: redis_src/concourse/tasks/main.yml
         vars:
           cass-host: ((cassandra-host))
