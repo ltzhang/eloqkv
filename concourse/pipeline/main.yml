@@ -53,8 +53,6 @@ jobs:
               trigger: true
             - get: redis_src
               trigger: true
-            - get: logservice_src
-              trigger: true
             - get: eloq_test_src
               trigger: true
             - get: eloq_ubuntu_2404
