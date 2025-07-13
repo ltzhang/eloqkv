@@ -60,14 +60,6 @@ else
 fi
 
 sudo apt-get update
-sudo apt install python3.8-venv -y
-
-# todo: move these code to docker-image
-sudo apt install openssh-server -y
-sudo service ssh start
-cat /home/mono/.ssh/id_rsa.pub >> /home/mono/.ssh/authorized_keys
-# disable ask when do ssh
-sudo sed -i "s/#\s*StrictHostKeyChecking ask/    StrictHostKeyChecking no/g" /etc/ssh/ssh_config
 
 python3 -m venv my_env
 source my_env/bin/activate
