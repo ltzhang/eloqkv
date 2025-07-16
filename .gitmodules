@@ -1,6 +1,3 @@
-[submodule "cass"]
-	path = cass
-	url = https://github.com/eloqdata/cpp-driver.git
 [submodule "eloq_metrics"]
 	path = eloq_metrics
 	url = https://github.com/eloqdata/eloq-metrics.git
