@@ -590,13 +590,8 @@ set(INCLUDE_DIRS
     ${PROJECT_SOURCE_DIR}/tx_service/include/fault
     ${PROJECT_SOURCE_DIR}/tx_service/include/store
     ${PROJECT_SOURCE_DIR}/tx_service/tx-log-protos
+    ${PROJECT_SOURCE_DIR}/store_handler/eloq_data_store_service
 )
-
-# Add conditional includes
-if((WITH_DATA_STORE STREQUAL "ELOQDSS_ROCKSDB_CLOUD_S3") OR
-    (WITH_DATA_STORE STREQUAL "ELOQDSS_ROCKSDB_CLOUD_GCS"))
-    list(APPEND INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/store_handler/eloq_data_store_service)
-endif()
 
 if(WITH_LOG_SERVICE)
     if(OPEN_LOG_SERVICE)
