@@ -15,7 +15,7 @@
 </div>
 
 # EloqKV  
-EloqKV is a high performance distributed database with Redis/ValKey compatible API. It is designed for developers who need a modern no-compromise database to support the new class of demanding applications in the AI age with features like **ACID transactions, tiered storage, and Session-style syntax** — all while keeping Redis' simplicity.
+EloqKV is a high-performance distributed database with a Redis/ValKey compatible API. It offers features like **ACID transactions, full elasticity and scalability, tiered storage, and session-style transaction syntax** — all while preserving Redis' simplicity and usability. EloqKV is engineered for developers who need a modern no-compromise database solution to power the next generation of demanding applications in the AI era. 
 
 - [Key Features](#key-features)
 - [Quick Start](#quick-start)
@@ -134,7 +134,7 @@ We invite you to try our Cloud-Native Serverless offering in the managed [EloqCl
 </a>
 </div>
 
-EloqKV is a decoupled, distributed database built on [Data Substrate](https://www.eloqdata.com/blog/2024/08/11/data-substrate), the innovative new database foundation developed by EloqData.
+EloqKV is a decoupled, distributed database built on [Data Substrate](https://www.eloqdata.com/blog/2025/07/14/technology), the innovative new database foundation developed by EloqData.
 
 Each EloqKV instance includes a frontend, compatible with the Redis protocol, deployed together with the core TxService to handle data operations. A logically independent LogService handles Write Ahead Logging (WAL) to ensure persistence, while a Storage Service manages memory state checkpoints and cold data storage.
 
@@ -217,7 +217,7 @@ cd install
 
 ## License
 
-EloqKV is under under a dual license. You may choose to use it under the terms of either:
+EloqKV is released under a dual license. You may choose to use it under the terms of either:
 1. GNU General Public License, Version 2 (GPLv2), or
 2. GNU Affero General Public License, Version 3 (AGPLv3).
 
