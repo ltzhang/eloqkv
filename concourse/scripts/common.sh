@@ -255,7 +255,7 @@ function run_build_ent() {
   set -e
 
   # compile log service to setup redis cluster later
-  cd /home/mono/workspace/eloqkv/log_service
+  cd /home/mono/workspace/eloqkv/eloq_log_service
   cmake -B bld -DCMAKE_BUILD_TYPE=$build_type && cmake --build bld -j 8
 
   set +e
@@ -263,7 +263,7 @@ function run_build_ent() {
   set -e
   cp /home/mono/workspace/eloqkv/cmake/eloqkv  /home/mono/workspace/eloqkv/cmake/install/bin/
   cp /home/mono/workspace/eloqkv/cmake/host_manager  /home/mono/workspace/eloqkv/cmake/install/bin/
-  cp /home/mono/workspace/eloqkv/log_service/bld/launch_sv  /home/mono/workspace/eloqkv/cmake/install/bin/
+  cp /home/mono/workspace/eloqkv/eloq_log_service/bld/launch_sv  /home/mono/workspace/eloqkv/cmake/install/bin/
 
 case "$kv_store_type" in
   ELOQDSS_*)
@@ -1191,6 +1191,9 @@ function run_eloqkv_tests() {
     if [ -d "./log_service" ]; then
       rm -rf ./log_service
     fi
+    if [ -d "./eloq_log_service" ]; then
+      rm -rf ./eloq_log_service
+    fi
 
     # run redis with wal disabled.
     rm -rf ${eloq_data_path}/*
@@ -1552,7 +1555,7 @@ function run_eloqkv_cluster_tests() {
     local log_service_ip_port="127.0.0.1:9000"
 
     rm -rf /tmp/log_data
-    /home/mono/workspace/eloqkv/log_service/bld/launch_sv \
+    /home/mono/workspace/eloqkv/cmake/install/bin/launch_sv \
       -conf=$log_service_ip_port \
       -node_id=0 \
       -storage_path="/tmp/log_data" \
@@ -1937,7 +1940,7 @@ function run_eloqkv_cluster_tests() {
     local log_service_ip_port="127.0.0.1:9000"
 
     rm -rf /tmp/log_data
-    /home/mono/workspace/eloqkv/log_service/bld/launch_sv \
+    /home/mono/workspace/eloqkv/cmake/install/bin/ \
       -conf=$log_service_ip_port \
       -node_id=0 \
       -storage_path="/tmp/log_data" \
@@ -2232,7 +2235,7 @@ function run_eloqkv_cluster_tests() {
     local log_service_ip_port="127.0.0.1:9000"
 
     rm -rf /tmp/log_data
-    /home/mono/workspace/eloqkv/log_service/bld/launch_sv \
+    /home/mono/workspace/eloqkv/cmake/install/bin/launch_sv \
       -conf=$log_service_ip_port \
       -node_id=0 \
       -storage_path="/tmp/log_data" \
@@ -2620,7 +2623,7 @@ function run_eloqkv_cluster_tests() {
     local log_service_ip_port="127.0.0.1:9000"
 
     rm -rf /tmp/log_data
-    ${eloqkv_base_path}/log_service/bld/launch_sv \
+    /home/mono/workspace/eloqkv/cmake/install/bin/launch_sv \
       -conf=$log_service_ip_port \
       -node_id=0 \
       -storage_path="/tmp/log_data" \
