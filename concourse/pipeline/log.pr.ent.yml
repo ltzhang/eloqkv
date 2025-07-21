@@ -64,7 +64,7 @@ jobs:
             - get: mono_ubuntu_2004
       - task: compile-test-task
         image: mono_ubuntu_2004
-        file: redis_src/concourse/tasks/logpr.ent.yml
+        file: redis_src/concourse/tasks/log.pr.ent.yml
         vars:
           minio-access-key: ((minio-access-key))
           minio-endpoint: ((minio-endpoint))
