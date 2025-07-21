@@ -5,7 +5,7 @@ resource_types:
       repository: teliaoss/github-pr-resource
 
 resources:
-  - name: eloqkv_pr
+  - name: redis_pr
     type: pull-request
     check_every: 3m
     source:
@@ -13,6 +13,7 @@ resources:
       base_branch: "main"
       access_token: ((git-token))
       ignore_drafts: true
+      disable_forks: false
 
   - name: logservice_src
     type: git
@@ -54,17 +55,16 @@ jobs:
     plan:
       - in_parallel:
           steps:
-            - get: eloqkv_pr
+            - get: redis_pr
               trigger: true
+              version: every
             - get: logservice_src
-              trigger: true
             - get: raft_host_manager_src
             - get: eloq_test_src
-              trigger: true
             - get: mono_ubuntu_2004
       - task: compile-test-task
         image: mono_ubuntu_2004
-        file: eloqkv_pr/concourse/tasks/pr.ent.yml
+        file: redis_pr/concourse/tasks/pr.ent.yml
         vars:
           cass-host: ((cassandra-host))
           minio-access-key: ((minio-access-key))
