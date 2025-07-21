@@ -46,6 +46,8 @@ git submodule sync
 git submodule update --init --recursive
 
 ln -s $WORKSPACE/logservice_pr eloq_log_service
+cd /home/mono/workspace/eloqkv/eloq_log_service
+git submodule update --init --recursive
 
 cd /home/mono/workspace/eloqkv/tx_service
 
