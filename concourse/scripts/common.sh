@@ -77,7 +77,7 @@ function run_tcl_tests()
     no_evicted=""
   fi
 
-  local eloqkv_base_path="/home/mono/workspace/eloqkv"
+  local eloqkv_base_path="/home/$current_user/workspace/eloqkv"
 
   cd ${eloqkv_base_path}
 
@@ -130,7 +130,7 @@ function cleanup_minio_bucket()
   bucket_name=$1
   #prefix="eloqkv-"
   bucket_full_name="eloqkv-${bucket_name}"
-  SCRIPT_DIR="/home/mono/workspace/eloqkv/concourse/scripts"
+  SCRIPT_DIR="/home/$current_user/workspace/eloqkv/concourse/scripts"
   echo "Clean up bucket ${bucket_name}"
   python3 ${SCRIPT_DIR}/cleanup_minio_bucket.py \
                --minio_endpoint ${ROCKSDB_CLOUD_S3_ENDPOINT} \
@@ -144,10 +144,10 @@ function run_build() {
   local kv_store_type=$2
 
   # compile eloqkv
-  cd /home/mono/workspace/eloqkv
+  cd /home/$current_user/workspace/eloqkv
   cmake \
-    -S /home/mono/workspace/eloqkv \
-    -B /home/mono/workspace/eloqkv/cmake \
+    -S /home/$current_user/workspace/eloqkv \
+    -B /home/$current_user/workspace/eloqkv/cmake \
     -DCMAKE_BUILD_TYPE=$build_type \
     -DWITH_DATA_STORE=$kv_store_type \
     -DBUILD_WITH_TESTS=ON \
@@ -160,19 +160,20 @@ function run_build() {
   # Function to run cmake build and check for errors
   run_cmake_build() {
     local target=$1
-    echo "redirecting output to /tmp/compile_info.log to prevent ci pipeline crash"
-    cmake --build /home/mono/workspace/eloqkv/cmake --target "$target" -j 8 > "$log_file" 2>&1
-    local exit_status=$?
-
-    if [ $exit_status -ne 0 ]; then
-      echo "CMake build for target '$target' failed. Printing the last 100 lines of the log:"
-      tail -n 500 "$log_file"
-      exit $exit_status
-    else
-      echo "CMake build for target '$target' completed successfully."
-      # Optionally, remove the log file if the build succeeded
-      rm "$log_file"
-    fi
+    cmake --build /home/$current_user/workspace/eloqkv/cmake --target "$target" -j 8
+#    echo "redirecting output to /tmp/compile_info.log to prevent ci pipeline crash"
+#    cmake --build /home/$current_user/workspace/eloqkv/cmake --target "$target" -j 8 > "$log_file" 2>&1
+#    local exit_status=$?
+#
+#    if [ $exit_status -ne 0 ]; then
+#      echo "CMake build for target '$target' failed. Printing the last 100 lines of the log:"
+#      tail -n 500 "$log_file"
+#      exit $exit_status
+#    else
+#      echo "CMake build for target '$target' completed successfully."
+#      # Optionally, remove the log file if the build succeeded
+#      rm "$log_file"
+#    fi
   }
 
   # Run builds for the specified targets
@@ -185,25 +186,25 @@ function run_build() {
   set -e
 
   # compile log service to setup redis cluster later
-  cd /home/mono/workspace/eloqkv/log_service
+  cd /home/$current_user/workspace/eloqkv/log_service
   cmake -B bld -DCMAKE_BUILD_TYPE=$build_type && cmake --build bld -j 8
 
   set +e
-  mkdir -p "/home/mono/workspace/eloqkv/cmake/install/bin"
+  mkdir -p "/home/$current_user/workspace/eloqkv/cmake/install/bin"
   set -e
-  cp /home/mono/workspace/eloqkv/cmake/eloqkv  /home/mono/workspace/eloqkv/cmake/install/bin/
-  cp /home/mono/workspace/eloqkv/log_service/bld/launch_sv  /home/mono/workspace/eloqkv/cmake/install/bin/
+  cp /home/$current_user/workspace/eloqkv/cmake/eloqkv  /home/$current_user/workspace/eloqkv/cmake/install/bin/
+  cp /home/$current_user/workspace/eloqkv/log_service/bld/launch_sv  /home/$current_user/workspace/eloqkv/cmake/install/bin/
 
 case "$kv_store_type" in
   ELOQDSS_*)
       echo "build dss_server"
-      cd /home/mono/workspace/eloqkv/store_handler/eloq_data_store_service
+      cd /home/$current_user/workspace/eloqkv/store_handler/eloq_data_store_service
       cmake -B bld -DCMAKE_BUILD_TYPE=$build_type -DWITH_DATA_STORE=$kv_store_type && cmake --build bld -j8
-      cp /home/mono/workspace/eloqkv/store_handler/eloq_data_store_service/bld/dss_server  /home/mono/workspace/eloqkv/cmake/install/bin/
+      cp /home/$current_user/workspace/eloqkv/store_handler/eloq_data_store_service/bld/dss_server  /home/$current_user/workspace/eloqkv/cmake/install/bin/
       ;;
 esac
 
-  cd /home/mono/workspace/eloqkv
+  cd /home/$current_user/workspace/eloqkv
 
 }
 
@@ -212,10 +213,10 @@ function run_build_ent() {
   local kv_store_type=$2
 
   # compile eloqkv
-  cd /home/mono/workspace/eloqkv
+  cd /home/$current_user/workspace/eloqkv
   cmake \
-    -S /home/mono/workspace/eloqkv \
-    -B /home/mono/workspace/eloqkv/cmake \
+    -S /home/$current_user/workspace/eloqkv \
+    -B /home/$current_user/workspace/eloqkv/cmake \
     -DCMAKE_BUILD_TYPE=$build_type \
     -DWITH_DATA_STORE=$kv_store_type \
     -DBUILD_WITH_TESTS=ON \
@@ -230,19 +231,20 @@ function run_build_ent() {
   # Function to run cmake build and check for errors
   run_cmake_build() {
     local target=$1
-    echo "redirecting output to /tmp/compile_info.log to prevent ci pipeline crash"
-    cmake --build /home/mono/workspace/eloqkv/cmake --target "$target" -j 8 > "$log_file" 2>&1
-    local exit_status=$?
-
-    if [ $exit_status -ne 0 ]; then
-      echo "CMake build for target '$target' failed. Printing the last 100 lines of the log:"
-      tail -n 500 "$log_file"
-      exit $exit_status
-    else
-      echo "CMake build for target '$target' completed successfully."
-      # Optionally, remove the log file if the build succeeded
-      rm "$log_file"
-    fi
+    cmake --build /home/$current_user/workspace/eloqkv/cmake --target "$target" -j 8
+    #    echo "redirecting output to /tmp/compile_info.log to prevent ci pipeline crash"
+    #    cmake --build /home/$current_user/workspace/eloqkv/cmake --target "$target" -j 8 > "$log_file" 2>&1
+    #    local exit_status=$?
+    #
+    #    if [ $exit_status -ne 0 ]; then
+    #      echo "CMake build for target '$target' failed. Printing the last 100 lines of the log:"
+    #      tail -n 500 "$log_file"
+    #      exit $exit_status
+    #    else
+    #      echo "CMake build for target '$target' completed successfully."
+    #      # Optionally, remove the log file if the build succeeded
+    #      rm "$log_file"
+    #    fi
   }
 
   # Run builds for the specified targets
@@ -255,26 +257,26 @@ function run_build_ent() {
   set -e
 
   # compile log service to setup redis cluster later
-  cd /home/mono/workspace/eloqkv/eloq_log_service
+  cd /home/$current_user/workspace/eloqkv/eloq_log_service
   cmake -B bld -DCMAKE_BUILD_TYPE=$build_type && cmake --build bld -j 8
 
   set +e
-  mkdir -p "/home/mono/workspace/eloqkv/cmake/install/bin"
+  mkdir -p "/home/$current_user/workspace/eloqkv/cmake/install/bin"
   set -e
-  cp /home/mono/workspace/eloqkv/cmake/eloqkv  /home/mono/workspace/eloqkv/cmake/install/bin/
-  cp /home/mono/workspace/eloqkv/cmake/host_manager  /home/mono/workspace/eloqkv/cmake/install/bin/
-  cp /home/mono/workspace/eloqkv/eloq_log_service/bld/launch_sv  /home/mono/workspace/eloqkv/cmake/install/bin/
+  cp /home/$current_user/workspace/eloqkv/cmake/eloqkv  /home/$current_user/workspace/eloqkv/cmake/install/bin/
+  cp /home/$current_user/workspace/eloqkv/cmake/host_manager  /home/$current_user/workspace/eloqkv/cmake/install/bin/
+  cp /home/$current_user/workspace/eloqkv/eloq_log_service/bld/launch_sv  /home/$current_user/workspace/eloqkv/cmake/install/bin/
 
 case "$kv_store_type" in
   ELOQDSS_*)
       echo "build dss_server"
-      cd /home/mono/workspace/eloqkv/store_handler/eloq_data_store_service
+      cd /home/$current_user/workspace/eloqkv/store_handler/eloq_data_store_service
       cmake -B bld -DCMAKE_BUILD_TYPE=$build_type -DWITH_DATA_STORE=$kv_store_type && cmake --build bld -j8
-      cp /home/mono/workspace/eloqkv/store_handler/eloq_data_store_service/bld/dss_server  /home/mono/workspace/eloqkv/cmake/install/bin/
+      cp /home/$current_user/workspace/eloqkv/store_handler/eloq_data_store_service/bld/dss_server  /home/$current_user/workspace/eloqkv/cmake/install/bin/
       ;;
 esac
 
-  cd /home/mono/workspace/eloqkv
+  cd /home/$current_user/workspace/eloqkv
 
 }
 
@@ -289,17 +291,17 @@ function run_eloq_ttl_tests() {
   local keyspace_name="redis_test_${timestamp}"
   echo "cassandra keyspace name is, ${keyspace_name}"
 
-  cd /home/mono/workspace/eloqkv
-  local exe_path="/home/mono/workspace/eloqkv/cmake/eloqkv"
-  local python_test_file="/home/mono/workspace/eloq_test/redis_test/single_test/test_ttl_eloqkv.py"
-  python3 $python_test_file $exe_path ${test_case} --enable_wal=${enable_wal} --enable_data_store=${enable_data_store} --kv_type=${kv_type} --cass_host=${CASS_HOST} --cass_keyspace=${keyspace_name} --cass_bin="/home/mono/workspace/apache-cassandra-4.0.6/bin/"
+  cd /home/$current_user/workspace/eloqkv
+  local exe_path="/home/$current_user/workspace/eloqkv/cmake/eloqkv"
+  local python_test_file="/home/$current_user/workspace/eloq_test/redis_test/single_test/test_ttl_eloqkv.py"
+  python3 $python_test_file $exe_path ${test_case} --enable_wal=${enable_wal} --enable_data_store=${enable_data_store} --kv_type=${kv_type} --cass_host=${CASS_HOST} --cass_keyspace=${keyspace_name} --cass_bin="/home/$current_user/workspace/apache-cassandra-4.0.6/bin/"
 
 }
 
 function run_eloqkv_tests() {
   local build_type=$1
   local kv_store_type=$2
-  local eloqkv_base_path="/home/mono/workspace/eloqkv"
+  local eloqkv_base_path="/home/$current_user/workspace/eloqkv"
 
   cd ${eloqkv_base_path}
 
@@ -308,11 +310,11 @@ function run_eloqkv_tests() {
     local timestamp=$(($(date +%s%N) / 1000000))
     local keyspace_name="redis_test_${timestamp}"
     echo "cassandra keyspace name is, ${keyspace_name}"
-    /home/mono/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
+    /home/$current_user/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
 
     # run redis
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -337,7 +339,7 @@ function run_eloqkv_tests() {
     # log replay test
     echo "Running log replay test for $build_type build: "
 
-    local python_test_file="/home/mono/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
+    local python_test_file="/home/$current_user/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
     python3 $python_test_file --load > /tmp/load.log 2>&1
 
     # wait for load to finish
@@ -353,7 +355,7 @@ function run_eloqkv_tests() {
 
     # run redis
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -402,7 +404,7 @@ function run_eloqkv_tests() {
     # wait for kill to finish
     wait_until_finished
 
-    cd /home/mono/workspace/eloqkv
+    cd /home/$current_user/workspace/eloqkv
     if [ -d "./cc_ng" ]; then
       rm -rf ./cc_ng
     fi
@@ -415,7 +417,7 @@ function run_eloqkv_tests() {
 
     # run redis with wal disabled.
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=6379 \
         --core_number=2 \
         --enable_wal=false \
@@ -445,11 +447,11 @@ function run_eloqkv_tests() {
     wait_until_finished
 
     # drop cassandra keyspace
-    /home/mono/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
+    /home/$current_user/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
 
     # run redis with wal and data store disabled.
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=6379 \
         --core_number=2 \
         --enable_wal=false \
@@ -478,7 +480,7 @@ function run_eloqkv_tests() {
 
     echo "bootstrap rocksdb"
 
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -492,7 +494,7 @@ function run_eloqkv_tests() {
 
     # run redis
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -515,7 +517,7 @@ function run_eloqkv_tests() {
     # log replay test
     echo "Running log replay test for $build_type build: "
 
-    local python_test_file="/home/mono/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
+    local python_test_file="/home/$current_user/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
     python3 $python_test_file --load > /tmp/load.log 2>&1
 
     # wait for load to finish
@@ -531,7 +533,7 @@ function run_eloqkv_tests() {
 
     # run redis
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -578,7 +580,7 @@ function run_eloqkv_tests() {
     # wait for kill to finish
     wait_until_finished
 
-    cd /home/mono/workspace/eloqkv
+    cd /home/$current_user/workspace/eloqkv
     if [ -d "./cc_ng" ]; then
       rm -rf ./cc_ng
     fi
@@ -591,7 +593,7 @@ function run_eloqkv_tests() {
 
     # run redis with wal disabled.
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=6379 \
         --core_number=2 \
         --enable_wal=false \
@@ -620,7 +622,7 @@ function run_eloqkv_tests() {
 
     # run redis with wal and data store disabled.
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=6379 \
         --core_number=2 \
         --enable_wal=false \
@@ -662,7 +664,7 @@ function run_eloqkv_tests() {
 
     # run redis
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -690,7 +692,7 @@ function run_eloqkv_tests() {
     # log replay test
     echo "Running log replay test for $build_type build: "
 
-    local python_test_file="/home/mono/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
+    local python_test_file="/home/$current_user/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
     python3 $python_test_file --load > /tmp/load.log 2>&1
 
     # wait for load to finish
@@ -706,7 +708,7 @@ function run_eloqkv_tests() {
 
     # run redis
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -758,7 +760,7 @@ function run_eloqkv_tests() {
     # wait for kill to finish
     wait_until_finished
 
-    cd /home/mono/workspace/eloqkv
+    cd /home/$current_user/workspace/eloqkv
     if [ -d "./cc_ng" ]; then
       rm -rf ./cc_ng
     fi
@@ -771,7 +773,7 @@ function run_eloqkv_tests() {
 
     # run redis with wal disabled.
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=6379 \
         --core_number=2 \
         --enable_wal=false \
@@ -807,7 +809,7 @@ function run_eloqkv_tests() {
 
     # run redis with wal and data store disabled.
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=6379 \
         --core_number=2 \
         --enable_wal=false \
@@ -843,7 +845,7 @@ function run_eloqkv_tests() {
     local rocksdb_cloud_aws_secret_access_key=${ROCKSDB_CLOUD_AWS_SECRET_ACCESS_KEY}
     local rocksdb_cloud_bucket_name=${ROCKSDB_CLOUD_BUCKET_NAME}
 
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -861,7 +863,7 @@ function run_eloqkv_tests() {
 
     # run redis
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -888,7 +890,7 @@ function run_eloqkv_tests() {
     # log replay test
     echo "Running log replay test for $build_type build: "
 
-    local python_test_file="/home/mono/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
+    local python_test_file="/home/$current_user/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
     python3 $python_test_file --load > /tmp/load.log 2>&1
 
     # wait for load to finish
@@ -904,7 +906,7 @@ function run_eloqkv_tests() {
 
     # run redis
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -955,7 +957,7 @@ function run_eloqkv_tests() {
     # wait for kill to finish
     wait_until_finished
 
-    cd /home/mono/workspace/eloqkv
+    cd /home/$current_user/workspace/eloqkv
     if [ -d "./cc_ng" ]; then
       rm -rf ./cc_ng
     fi
@@ -968,7 +970,7 @@ function run_eloqkv_tests() {
 
     # run redis with wal disabled.
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=6379 \
         --core_number=2 \
         --enable_wal=false \
@@ -1001,7 +1003,7 @@ function run_eloqkv_tests() {
 
     # run redis with wal and data store disabled.
     echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=6379 \
         --core_number=2 \
         --enable_wal=false \
@@ -1041,7 +1043,7 @@ function run_eloqkv_tests() {
     local node_memory_limit_mb=8192
     local eloq_store_worker_num=2
     local eloq_store_data_path="/tmp/eloqkv_data/eloq_store"
-    local eloqkv_bin_path="/home/mono/workspace/eloqkv/cmake/eloqkv"
+    local eloqkv_bin_path="/home/$current_user/workspace/eloqkv/cmake/eloqkv"
 
     # run redis with small ckpt interval.
     rm -rf ${eloq_data_path}/*
@@ -1368,7 +1370,7 @@ function start_dss_server() {
     local dss_ip=$1
     local dss_port=$2
     local kv_store_type=$3
-    local eloqkv_base_path="/home/mono/workspace/eloqkv"
+    local eloqkv_base_path="/home/$current_user/workspace/eloqkv"
     local dss_data_path="/tmp/eloq_dss_data"
     local dss_log_path="/tmp/eloq_dss_data/eloq_dss_server.log"
     local dss_server_configs=
@@ -1410,7 +1412,7 @@ function start_dss_server() {
 function run_eloqkv_cluster_tests() {
   local build_type=$1
   local kv_store_type=$2
-  local eloqkv_base_path="/home/mono/workspace/eloqkv"
+  local eloqkv_base_path="/home/$current_user/workspace/eloqkv"
 
   cd ${eloqkv_base_path}
 
@@ -1426,7 +1428,7 @@ function run_eloqkv_cluster_tests() {
 
     for port in "${ports[@]}"; do
       echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=false \
@@ -1475,10 +1477,10 @@ function run_eloqkv_cluster_tests() {
     local keyspace_name="redis_test_${timestamp}"
     echo "cassandra keyspace name is, ${keyspace_name}"
     rm -rf /tmp/redis_server_data*
-    /home/mono/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
+    /home/$current_user/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
 
     echo "bootstrap before start cluster to avoid contention"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=false \
@@ -1511,7 +1513,7 @@ function run_eloqkv_cluster_tests() {
     redis_pids=()
     local index=0
     for port in "${ports[@]}"; do
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=false \
@@ -1555,7 +1557,7 @@ function run_eloqkv_cluster_tests() {
     local log_service_ip_port="127.0.0.1:9000"
 
     rm -rf /tmp/log_data
-    /home/mono/workspace/eloqkv/cmake/install/bin/launch_sv \
+    /home/$current_user/workspace/eloqkv/cmake/install/bin/launch_sv \
       -conf=$log_service_ip_port \
       -node_id=0 \
       -storage_path="/tmp/log_data" \
@@ -1569,10 +1571,10 @@ function run_eloqkv_cluster_tests() {
     sleep 10
 
     rm -rf /tmp/redis_server_data*
-    /home/mono/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
+    /home/$current_user/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
 
     echo "bootstrap before start cluster to avoid contention"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -1609,7 +1611,7 @@ function run_eloqkv_cluster_tests() {
 
     for port in "${ports[@]}"; do
       echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=true \
@@ -1647,7 +1649,7 @@ function run_eloqkv_cluster_tests() {
     # TODO(ZX) log replay test for cluster
     echo "Running log replay test for Debug build: "
 
-    local python_test_file="/home/mono/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
+    local python_test_file="/home/$current_user/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
     python3 $python_test_file --load > load.log 2>&1
 
     # wait for load to finish
@@ -1667,7 +1669,7 @@ function run_eloqkv_cluster_tests() {
     redis_pids=()
     local index=0
     for port in "${ports[@]}"; do
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=true \
@@ -1730,11 +1732,11 @@ function run_eloqkv_cluster_tests() {
     kill $log_service_pid
     wait_until_finished
     # drop cassandra keyspace
-    /home/mono/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
+    /home/$current_user/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
 
   elif [[ $kv_store_type = "ROCKSDB" ]]; then
     echo "bootstrap before start cluster to avoid contention"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=false \
@@ -1767,7 +1769,7 @@ function run_eloqkv_cluster_tests() {
 
     for port in "${ports[@]}"; do
       echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=false \
@@ -1817,7 +1819,7 @@ function run_eloqkv_cluster_tests() {
 
     for port in "${ports[@]}"; do
       echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=false \
@@ -1867,7 +1869,7 @@ function run_eloqkv_cluster_tests() {
     local aws_secret_key=${AWS_SECRET_ACCESS_KEY}
 
     echo "bootstrap before start cluster to avoid contention"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=false \
@@ -1897,7 +1899,7 @@ function run_eloqkv_cluster_tests() {
     local index=0
     redis_pids=()
     for port in "${ports[@]}"; do
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=false \
@@ -1940,7 +1942,7 @@ function run_eloqkv_cluster_tests() {
     local log_service_ip_port="127.0.0.1:9000"
 
     rm -rf /tmp/log_data
-    /home/mono/workspace/eloqkv/cmake/install/bin/ \
+    /home/$current_user/workspace/eloqkv/cmake/install/bin/ \
       -conf=$log_service_ip_port \
       -node_id=0 \
       -storage_path="/tmp/log_data" \
@@ -1960,7 +1962,7 @@ function run_eloqkv_cluster_tests() {
     echo "dynamo keyspace name is, ${keyspace_name}"
 
     echo "bootstrap before start cluster to avoid contention"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -1995,7 +1997,7 @@ function run_eloqkv_cluster_tests() {
 
     for port in "${ports[@]}"; do
       echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=true \
@@ -2031,7 +2033,7 @@ function run_eloqkv_cluster_tests() {
     # TODO(ZX) log replay test for cluster
     echo "Running log replay test for Debug build: "
 
-    local python_test_file="/home/mono/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
+    local python_test_file="/home/$current_user/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
     python3 $python_test_file --load > load.log 2>&1
 
     # wait for load to finish
@@ -2051,7 +2053,7 @@ function run_eloqkv_cluster_tests() {
     redis_pids=()
     local index=0
     for port in "${ports[@]}"; do
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=true \
@@ -2131,7 +2133,7 @@ function run_eloqkv_cluster_tests() {
 
     for port in "${ports[@]}"; do
       echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=false \
@@ -2174,7 +2176,7 @@ function run_eloqkv_cluster_tests() {
     rm -rf /tmp/redis_server_data*
 
     echo "bootstrap before start cluster to avoid contention"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=false \
@@ -2199,7 +2201,7 @@ function run_eloqkv_cluster_tests() {
     redis_pids=()
     local index=0
     for port in "${ports[@]}"; do
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=false \
@@ -2235,7 +2237,7 @@ function run_eloqkv_cluster_tests() {
     local log_service_ip_port="127.0.0.1:9000"
 
     rm -rf /tmp/log_data
-    /home/mono/workspace/eloqkv/cmake/install/bin/launch_sv \
+    /home/$current_user/workspace/eloqkv/cmake/install/bin/launch_sv \
       -conf=$log_service_ip_port \
       -node_id=0 \
       -storage_path="/tmp/log_data" \
@@ -2254,7 +2256,7 @@ function run_eloqkv_cluster_tests() {
     rm -rf /tmp/redis_server_data*
 
     echo "bootstrap before start cluster to avoid contention"
-    /home/mono/workspace/eloqkv/cmake/eloqkv \
+    /home/$current_user/workspace/eloqkv/cmake/eloqkv \
       --port=6379 \
       --core_number=2 \
       --enable_wal=true \
@@ -2284,7 +2286,7 @@ function run_eloqkv_cluster_tests() {
 
     for port in "${ports[@]}"; do
       echo "redirecting output to /tmp/ to prevent ci pipeline crash"
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=true \
@@ -2315,7 +2317,7 @@ function run_eloqkv_cluster_tests() {
     # TODO(ZX) log replay test for cluster
     echo "Running log replay test for Debug build: "
 
-    local python_test_file="/home/mono/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
+    local python_test_file="/home/$current_user/workspace/eloqkv/tests/unit/mono/log_replay_test/log_replay_test.py"
     python3 $python_test_file --load > load.log 2>&1
 
     # wait for load to finish
@@ -2335,7 +2337,7 @@ function run_eloqkv_cluster_tests() {
     redis_pids=()
     local index=0
     for port in "${ports[@]}"; do
-      /home/mono/workspace/eloqkv/cmake/eloqkv \
+      /home/$current_user/workspace/eloqkv/cmake/eloqkv \
         --port=$port \
         --core_number=2 \
         --enable_wal=true \
@@ -2400,7 +2402,7 @@ function run_eloqkv_cluster_tests() {
     local node_memory_limit_mb=8192
     local dss_peer_node="127.0.0.1:9100"
     local ports=(6379 7379 8379)
-    local eloqkv_bin_path="/home/mono/workspace/eloqkv/cmake/eloqkv"
+    local eloqkv_bin_path="/home/$current_user/workspace/eloqkv/cmake/eloqkv"
 
     #
     # pure memory mode does not need log service
@@ -2623,7 +2625,7 @@ function run_eloqkv_cluster_tests() {
     local log_service_ip_port="127.0.0.1:9000"
 
     rm -rf /tmp/log_data
-    /home/mono/workspace/eloqkv/cmake/install/bin/launch_sv \
+    /home/$current_user/workspace/eloqkv/cmake/install/bin/launch_sv \
       -conf=$log_service_ip_port \
       -node_id=0 \
       -storage_path="/tmp/log_data" \
@@ -2706,7 +2708,7 @@ function run_eloqkv_cluster_tests() {
 
     echo "Running log replay test for Debug build: " >> /tmp/redis_cluster_with_eloqstore.log
 
-    local python_test_file="${eloqkv_base_path}/tests/unit/mono/log_replay_test/log_replay_test.py"
+    local python_test_file="${eloqkv_base_path}/tests/unit/$current_user/log_replay_test/log_replay_test.py"
     python3 $python_test_file --load > /tmp/load.log 2>&1
 
     # wait for load to finish
@@ -2811,19 +2813,19 @@ function run_eloq_test(){
   # https://github.com/grpc/grpc/blob/master/doc/fork_support.md
   export GRPC_ENABLE_FORK_SUPPORT=0
 
-  local eloqkv_install_path="/home/mono/workspace/eloqkv/cmake/install"
+  local eloqkv_install_path="/home/$current_user/workspace/eloqkv/cmake/install"
 
-  if [ ! -d "/home/mono/workspace/eloq_test/" ]; then
-    echo "/home/mono/workspace/eloq_test/ not exists, exit !!!"
+  if [ ! -d "/home/$current_user/workspace/eloq_test/" ]; then
+    echo "/home/$current_user/workspace/eloq_test/ not exists, exit !!!"
   fi
 
-  cd /home/mono/workspace/eloq_test
+  cd /home/$current_user/workspace/eloq_test
   ./setup
 
-  if [ -d "/home/mono/workspace/eloq_test/runtime" ]; then
-    rm -rf /home/mono/workspace/eloq_test/runtime/*
+  if [ -d "/home/$current_user/workspace/eloq_test/runtime" ]; then
+    rm -rf /home/$current_user/workspace/eloq_test/runtime/*
   else
-    mkdir /home/mono/workspace/eloq_test/runtime
+    mkdir /home/$current_user/workspace/eloq_test/runtime
   fi
 
   # generate cassandra keyspace name.
@@ -2833,7 +2835,7 @@ function run_eloq_test(){
   if [[ $kv_store_type = "CASSANDRA" ]]; then
     echo "cassandra keyspace name is, ${keyspace_name}"
     # drop cassandra keyspace
-    /home/mono/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
+    /home/$current_user/workspace/apache-cassandra-4.0.6/bin/cqlsh $CASS_HOST -e "DROP KEYSPACE IF EXISTS $keyspace_name;"
 
     sed -i "s/eloq_keyspace_name.*=.\+/eloq_keyspace_name=${keyspace_name}/g" ./storage.cnf
     sed -i "s/eloq_cass_hosts.*=.\+/eloq_cass_hosts=${CASS_HOST}/g" ./storage.cnf
