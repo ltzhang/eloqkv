@@ -45,8 +45,6 @@ resources:
     source:
       repository: eloqdata/monograph-dev-ci-ubuntu2404
       tag: latest
-      username: monographdb
-      password: ((docker-secret-key))
 
 jobs:
   - name: compile-test
@@ -75,6 +73,7 @@ jobs:
           minio-access-key: ((minio-access-key))
           minio-endpoint: ((minio-endpoint))
           minio-secret-key: ((minio-secret-key))
+          git-ssh-key: ((git-key))
         privileged: true
         on_failure:
           put: redis_pr
