@@ -88,14 +88,23 @@ copy_libraries() {
 
 S3_BUCKET="eloq-release"
 S3_PREFIX="s3://${S3_BUCKET}/eloqkv"
-KVS_ID=$(echo ${KV_TYPE} | tr '[:upper:]' '[:lower:]')
-if [ "${KV_TYPE}" = "ELOQDSS_ROCKSDB_CLOUD_S3" ]; then
+
+# Normalize behavior for supported KV_TYPE values
+if [ "${KV_TYPE}" = "ROCKSDB" ]; then
+    KVS_ID="rocksdb"
+elif [ "${KV_TYPE}" = "ELOQDSS_ROCKSDB_CLOUD_S3" ]; then
     CMAKE_ARGS="${CMAKE_ARGS} -DUSE_ROCKSDB_LOG_STATE=ON -DWITH_ROCKSDB_CLOUD=S3 -DWITH_CLOUD_AZ_INFO=ON"
     KVS_ID="rocks_s3"
 elif [ "${KV_TYPE}" = "ELOQDSS_ROCKSDB_CLOUD_GCS" ]; then
     CMAKE_ARGS="${CMAKE_ARGS} -DUSE_ROCKSDB_LOG_STATE=ON -DWITH_ROCKSDB_CLOUD=GCS"
     KVS_ID="rocks_gcs"
+elif [ "${KV_TYPE}" = "ELOQDSS_ROCKSDB" ]; then
+    KVS_ID="eloqdss_rocksdb"
+else
+    echo "Unsupported KV_TYPE: ${KV_TYPE}"
+    exit 1
 fi
+
 
 if [ "$ASAN" = "ON" ]; then
     export ASAN_OPTIONS=abort_on_error=1:detect_container_overflow=0:leak_check_at_exit=0
@@ -158,7 +167,8 @@ copy_libraries eloqkv ${DEST_DIR}/lib
 mv eloqkv ${DEST_DIR}/bin/
 copy_libraries host_manager ${DEST_DIR}/lib
 mv host_manager ${DEST_DIR}/bin/
-if [ $KVS_ID = "rocksdb" ]; then
+
+if [ "${KV_TYPE}" = "ROCKSDB" ]; then
     copy_libraries eloqkv_to_aof ${DEST_DIR}/lib
     mv eloqkv_to_aof ${DEST_DIR}/bin/
     copy_libraries eloqkv_to_rdb ${DEST_DIR}/lib
@@ -199,33 +209,31 @@ build_upload_log_srv() {
       exit 1
     fi
     local log_tarball=$1
-    local build_for_cloud=$2
+    local kv_type=$2
     log_sv_src=${ELOQKV_SRC}/eloq_log_service
     cd ${log_sv_src}
     mkdir -p LogService/bin
     mkdir build && cd build
-    if [ "$build_for_cloud" = true ]; then
-        cmake .. -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DWITH_ASAN=$ASAN -DDISABLE_CODE_LINE_IN_LOG=ON -DUSE_ROCKSDB_LOG_STATE=ON -DWITH_ROCKSDB_CLOUD=S3 -DWITH_CLOUD_AZ_INFO=ON
-    else
-        cmake .. -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DWITH_ASAN=$ASAN -DDISABLE_CODE_LINE_IN_LOG=ON
+    cmake_args="-DCMAKE_BUILD_TYPE=$BUILD_TYPE -DWITH_ASAN=$ASAN -DDISABLE_CODE_LINE_IN_LOG=ON -DUSE_ROCKSDB_LOG_STATE=ON"
+    if [ "$kv_type" = "ELOQDSS_ROCKSDB_CLOUD_S3" ]; then
+        cmake_args="$cmake_args -DWITH_ROCKSDB_CLOUD=S3 -DWITH_CLOUD_AZ_INFO=ON"
+    elif [ "$kv_type" = "ELOQDSS_ROCKSDB_CLOUD_GCS" ]; then
+        cmake_args="$cmake_args -DWITH_ROCKSDB_CLOUD=GCS"
     fi
+    cmake .. $cmake_args
     # build and copy log_server
     cmake --build . --config $BUILD_TYPE -j${NCORE}
     mv ${log_sv_src}/build/launch_sv ${log_sv_src}/LogService/bin
     copy_libraries ${log_sv_src}/LogService/bin/launch_sv ${log_sv_src}/LogService/lib
     cd ${HOME}
     tar -czvf log_service.tar.gz -C ${log_sv_src} LogService
-    if [ "$build_for_cloud" = true ]; then
-        aws s3 cp log_service.tar.gz ${S3_PREFIX}/logservice/cloud/${log_tarball}
-    else
-        aws s3 cp log_service.tar.gz ${S3_PREFIX}/logservice/${log_tarball}
-    fi
+    aws s3 cp log_service.tar.gz ${S3_PREFIX}/logservice/${KVS_ID}/${log_tarball}
     #clean up
     rm -rf log_service.tar.gz
     cd "${log_sv_src}"
     rm -rf build
     rm -rf LogService
-}
+ }
 
 if [ "${BUILD_LOG_SRV}" = true ]; then
     # make and build log_service
@@ -234,8 +242,8 @@ if [ "${BUILD_LOG_SRV}" = true ]; then
     else
         LOG_TARBALL="log-service-${OUT_NAME}-${OS_ID}-${ARCH}.tar.gz"
     fi
-    build_upload_log_srv "${LOG_TARBALL}" false
-    build_upload_log_srv "${LOG_TARBALL}" true
+
+    build_upload_log_srv "${LOG_TARBALL}" "${KV_TYPE}"
 
     if [ -n "${CLOUDFRONT_DIST}" ]; then
         aws cloudfront create-invalidation --distribution-id ${CLOUDFRONT_DIST} --paths "/eloqkv/logservice/${LOG_TARBALL}"
