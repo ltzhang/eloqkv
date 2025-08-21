@@ -4907,4 +4907,31 @@ brpc::RedisCommandHandlerResult TimeCommandHandler::Run(
     return brpc::REDIS_CMD_HANDLED;
 }
 
+brpc::RedisCommandHandlerResult WasmCommandHandler::Run(
+    RedisConnectionContext *ctx,
+    const std::vector<butil::StringPiece> &args,
+    brpc::RedisReply *output,
+    bool)
+{
+    assert(!args.empty() && args[0] == "wasm");
+    if (args.size() < 3)
+    {
+        output->SetError("ERR wrong number of arguments for 'wasm' command");
+        return brpc::REDIS_CMD_HANDLED;
+    }
+    if (ctx->txm)
+    {
+        output->SetError("ERR 'WASM' command not allowed in BEGIN");
+        return brpc::REDIS_CMD_HANDLED;
+    }
+    if (ctx->multi_transaction_handler)
+    {
+        output->SetError("ERR 'WASM' command not allowed in MULTI");
+        return brpc::REDIS_CMD_HANDLED;
+    }
+    //redis_impl_->EvalLua(ctx, args, output);
+    output->SetStatus("wasm success");
+    return brpc::REDIS_CMD_HANDLED;
+}
+
 }  // namespace EloqKV

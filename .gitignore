@@ -70,3 +70,8 @@ compile_commands*
 
 eloq_data
 eloq_log_service
+
+
+.cache/
+.cursor/
+doc_and_examples/

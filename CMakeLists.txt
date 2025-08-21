@@ -183,6 +183,19 @@ endif()
 
 include_directories(${GFLAGS_INCLUDE_PATH})
 
+# Find wasmtime library and headers
+find_path(WASMTIME_INCLUDE_PATH NAMES wasmtime.hh)
+find_library(WASMTIME_LIBRARY NAMES wasmtime)
+
+if((NOT WASMTIME_INCLUDE_PATH) OR(NOT WASMTIME_LIBRARY))
+    message(FATAL_ERROR "Fail to find wasmtime. Please install wasmtime development libraries.")
+endif()
+
+message(STATUS "WASMTIME_INCLUDE_PATH: ${WASMTIME_INCLUDE_PATH}")
+message(STATUS "WASMTIME_LIBRARY: ${WASMTIME_LIBRARY}")
+
+include_directories(${WASMTIME_INCLUDE_PATH})
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     include(CheckFunctionExists)
     CHECK_FUNCTION_EXISTS(clock_gettime HAVE_CLOCK_GETTIME)
@@ -488,6 +501,7 @@ SET(RESELOQ_RESOURCES
     src/redis_string_match.cpp
     src/redis_connection_context.cpp
     src/redis_stats.cpp
+    src/wasm_host.cpp
 )
 
 SET(INI_SOURCES src/ini.c src/INIReader.cpp)
@@ -604,7 +618,7 @@ add_subdirectory(fpconv)
 
 # add_executable(redis_press redis_press.cpp)
 add_executable(eloqkv src/redis_server.cpp ${RESELOQ_RESOURCES})
-target_link_libraries(eloqkv ${DYNAMIC_LIB} ${RESELOQ_LIBRARY} ${ABSEIL} lua fpconv)
+target_link_libraries(eloqkv ${DYNAMIC_LIB} ${RESELOQ_LIBRARY} ${ABSEIL} lua fpconv ${WASMTIME_LIBRARY})
 
 option(WITH_BOOST_STACKTRACE "With boost stack trace." OFF)
 message("WITH_BOOST_STACKTRACE: " ${WITH_BOOST_STACKTRACE})
@@ -619,13 +633,13 @@ endif()
 
 if(WITH_DATA_STORE STREQUAL "ROCKSDB")
     add_executable(eloqkv_to_aof src/tools/eloqkv2aof/eloqkv2aof.cpp ${RESELOQ_RESOURCES})
-    target_link_libraries(eloqkv_to_aof ${DYNAMIC_LIB} ${RESELOQ_LIBRARY} ${ABSEIL} lua fpconv)
+    target_link_libraries(eloqkv_to_aof ${DYNAMIC_LIB} ${RESELOQ_LIBRARY} ${ABSEIL} lua fpconv ${WASMTIME_LIBRARY})
     add_executable(eloqkv_to_rdb src/tools/eloqkv2rdb/eloqkv2rdb.cpp ${RESELOQ_RESOURCES})
-    target_link_libraries(eloqkv_to_rdb ${DYNAMIC_LIB} ${RESELOQ_LIBRARY} ${ABSEIL} lua fpconv)
+    target_link_libraries(eloqkv_to_rdb ${DYNAMIC_LIB} ${RESELOQ_LIBRARY} ${ABSEIL} lua fpconv ${WASMTIME_LIBRARY})
 endif()
 
 # add_executable(test_io_write src/tools/eloqkv2aof/test_io_write.cpp ${RESELOQ_RESOURCES})
-# target_link_libraries(test_io_write ${DYNAMIC_LIB} ${RESELOQ_LIBRARY} ${ABSEIL} lua fpconv)
+# target_link_libraries(test_io_write ${DYNAMIC_LIB} ${RESELOQ_LIBRARY} ${ABSEIL} lua fpconv ${WASMTIME_LIBRARY})
 
 # set(AUX_LIB readline ncurses)
 # add_executable(eloqkv-client src/redis_cli.cpp)
@@ -647,8 +661,28 @@ set_target_properties(eloqkv PROPERTIES
     INSTALL_RPATH "$ORIGIN/../lib"
     INSTALL_RPATH_USE_LINK_PATH TRUE)
 
+# Create a custom target for building WASM files
+add_custom_target(wasm_files ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/wasm ${CMAKE_BINARY_DIR}/wasm
+    COMMAND ${CMAKE_COMMAND} -E chdir ${CMAKE_BINARY_DIR}/wasm make
+    COMMENT "Building WASM files in build directory..."
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+# Make eloqkv depend on wasm_files
+add_dependencies(eloqkv wasm_files)
+
 install(TARGETS eloqkv
     RUNTIME DESTINATION bin)
+
+# Install WASM files to the appropriate location
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/wasm/
+    DESTINATION ${CMAKE_INSTALL_PREFIX}/wasm
+    FILES_MATCHING PATTERN "*.wasm"
+    PATTERN "Makefile" EXCLUDE
+    PATTERN "*.cpp" EXCLUDE
+    PATTERN "*.h" EXCLUDE
+)
 
 if(WITH_DATA_STORE STREQUAL "ROCKSDB")
     install(TARGETS eloqkv_to_aof

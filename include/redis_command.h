@@ -300,6 +300,8 @@ enum struct RedisCommandType
     UNSUBSCRIBE,
     PSUBSCRIBE,
     PUNSUBSCRIBE,
+
+    WASM,
 };
 
 enum RedisResultType

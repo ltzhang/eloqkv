@@ -3261,6 +3261,11 @@ void RedisServiceImpl::AddHandlers()
     auto &slowlog_hd =
         hd_vec_.emplace_back(std::make_unique<SlowLogCommandHandler>(this));
     AddCommandHandler("slowlog", slowlog_hd.get());
+
+    auto &wasm_hd =
+        hd_vec_.emplace_back(std::make_unique<WasmCommandHandler>(this));
+    AddCommandHandler("wasm", wasm_hd.get());
+
 }
 
 TransactionExecution *RedisServiceImpl::NewTxm(IsolationLevel iso_level,

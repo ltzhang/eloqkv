@@ -38,6 +38,9 @@
 #include "pub_sub_manager.h"
 #include "store_handler/kv_store.h"
 
+#include "wasm_host.h"
+
+
 #if (defined(DATA_STORE_TYPE_ELOQDSS_ROCKSDB_CLOUD_S3) ||                      \
      defined(DATA_STORE_TYPE_ELOQDSS_ROCKSDB_CLOUD_GCS) ||                     \
      defined(DATA_STORE_TYPE_ELOQDSS_ROCKSDB) ||                               \
@@ -810,7 +813,12 @@ private:
     std::optional<std::thread> metrics_collector_thd_;
 
     friend class MultiTransactionHandler;
-};
+    //for WASM
+    std::unique_ptr<WasmHost> wasm_host_;
+    public:
+        WasmHost* get_wasm_host() {
+            return wasm_host_.get();
+        }};
 
 bool CheckCommandLineFlagIsDefault(const char *name);
 }  // namespace EloqKV
