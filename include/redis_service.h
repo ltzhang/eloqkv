@@ -41,6 +41,7 @@
 #include "wasm_host.h"
 #include "kvt_manager.h"
 
+
 #if (defined(DATA_STORE_TYPE_ELOQDSS_ROCKSDB_CLOUD_S3) ||                      \
      defined(DATA_STORE_TYPE_ELOQDSS_ROCKSDB_CLOUD_GCS) ||                     \
      defined(DATA_STORE_TYPE_ELOQDSS_ROCKSDB) ||                               \
@@ -821,7 +822,11 @@ private:
     public:
         WasmHost* get_wasm_host() {
             return wasm_host_.get();
-        }};
+        }
 
+        KVTManager* get_kvt_manager() {
+            return kvt_manager_.get();
+        }
+    };
 bool CheckCommandLineFlagIsDefault(const char *name);
 }  // namespace EloqKV
