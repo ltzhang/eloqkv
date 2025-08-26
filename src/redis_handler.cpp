@@ -4934,4 +4934,32 @@ brpc::RedisCommandHandlerResult WasmCommandHandler::Run(
     return brpc::REDIS_CMD_HANDLED;
 }
 
+brpc::RedisCommandHandlerResult KVTCommandHandler::Run(
+    RedisConnectionContext *ctx,
+    const std::vector<butil::StringPiece> &args,
+    brpc::RedisReply *output,
+    bool)
+{
+    assert(!args.empty() && args[0] == "kvt");
+    if (args.size() < 3)
+    {
+        output->SetError("ERR wrong number of arguments for 'kvt' command");
+        return brpc::REDIS_CMD_HANDLED;
+    }
+    if (ctx->txm)
+    {
+        output->SetError("ERR 'KVT' command not allowed in BEGIN");
+        return brpc::REDIS_CMD_HANDLED;
+    }
+    if (ctx->multi_transaction_handler)
+    {
+        output->SetError("ERR 'KVT' command not allowed in MULTI");
+        return brpc::REDIS_CMD_HANDLED;
+    }
+    //redis_impl_->EvalLua(ctx, args, output);
+    output->SetStatus("KVT command successful");
+    return brpc::REDIS_CMD_HANDLED;
+}
+
+
 }  // namespace EloqKV

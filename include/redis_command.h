@@ -302,6 +302,7 @@ enum struct RedisCommandType
     PUNSUBSCRIBE,
 
     WASM,
+    KVT,
 };
 
 enum RedisResultType

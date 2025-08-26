@@ -3266,6 +3266,10 @@ void RedisServiceImpl::AddHandlers()
         hd_vec_.emplace_back(std::make_unique<WasmCommandHandler>(this));
     AddCommandHandler("wasm", wasm_hd.get());
 
+    auto &kvt_hd =
+        hd_vec_.emplace_back(std::make_unique<KVTCommandHandler>(this));
+    AddCommandHandler("kvt", kvt_hd.get());
+
 }
 
 TransactionExecution *RedisServiceImpl::NewTxm(IsolationLevel iso_level,

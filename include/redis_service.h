@@ -39,7 +39,7 @@
 #include "store_handler/kv_store.h"
 
 #include "wasm_host.h"
-
+#include "kvt_manager.h"
 
 #if (defined(DATA_STORE_TYPE_ELOQDSS_ROCKSDB_CLOUD_S3) ||                      \
      defined(DATA_STORE_TYPE_ELOQDSS_ROCKSDB_CLOUD_GCS) ||                     \
@@ -815,6 +815,9 @@ private:
     friend class MultiTransactionHandler;
     //for WASM
     std::unique_ptr<WasmHost> wasm_host_;
+    //for KVT
+    std::unique_ptr<KVTManager> kvt_manager_;
+
     public:
         WasmHost* get_wasm_host() {
             return wasm_host_.get();
