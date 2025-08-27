@@ -12,12 +12,10 @@ EloqKV is a high-performance distributed key-value database with Redis/ValKey AP
 ### Essential Build Commands
 ```bash
 cd build 
-make -j 8
+make eloqkv -j 6
 
 # Run EloqKV server
 cd build && rm -rf eloq_data && ./eloqkv
-
-ddd### Build Configuration Options
 
 ### High-Level Architecture
 

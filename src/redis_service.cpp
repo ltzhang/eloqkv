@@ -1721,6 +1721,10 @@ bool RedisServiceImpl::Init(brpc::Server &brpc_server)
             : config_reader.GetBoolean(
                   "local", "retry_on_occ_error", FLAGS_retry_on_occ_error);
 
+    //init wasm 
+    wasm_host_ = std::make_unique<WasmHost>();
+    LOG(INFO) << "WasmHost initialized";
+
     // Initialize KVTManager
     kvt_manager_ = std::make_unique<KVTManager>();
     kvt_manager_->initialize();

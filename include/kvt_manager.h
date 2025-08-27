@@ -25,16 +25,10 @@ namespace txservice {
 }
 
 namespace EloqKV {
-
-// Forward declarations
-class KvtTransactionContext;
-class KvtCursor;
-
 // Common types for KVT operations
 using KeyValuePair = std::pair<std::string, std::string>;
 
 class KVTTable {
-
 };
 
 /**
@@ -49,8 +43,8 @@ class KVTTable {
 class KVTManager {
 public:
     // Main command handler entry point - parses args and formats responses
-    bool handleCommand(const std::vector<butil::StringPiece> &args,
-                        brpc::RedisReply *output);
+    void handleCommand(const std::vector<butil::StringPiece> &args,
+                        brpc::RedisReply *output) {};
     
     // Initialize the manager with transaction service dependencies
     void initialize()
@@ -60,9 +54,11 @@ public:
     // Cleanup and shutdown
     void shutdown();
 
-    KVTManager();
+    KVTManager() {};
 
-    ~KVTManager();
+    ~KVTManager() {};
+
+    void startTestInBackground() {};
 
 private:
     KVTManager(const KVTManager&) = delete;
@@ -88,7 +84,7 @@ private:    // Member variables
     txservice::CatalogFactory* catalog_factory_{nullptr};
     
     // Transaction management
-    std::unordered_map<uint64_t, std::unique_ptr<txservice::TransactionExecution>> active_transactions_;
+    std::unordered_map<uint64_t, txservice::TransactionExecution *> active_transactions_;
 
     // Table management
     std::unordered_map<std::string, std::unique_ptr<KVTTable>> tables_; // table_name -> table
