@@ -1725,10 +1725,10 @@ bool RedisServiceImpl::Init(brpc::Server &brpc_server)
     wasm_host_ = std::make_unique<WasmHost>();
     LOG(INFO) << "WasmHost initialized";
 
-    // Initialize KVTManager
+    // Initialize KVTManager with tx_service and catalog factory
     kvt_manager_ = std::make_unique<KVTManager>();
-    kvt_manager_->initialize();
-    LOG(INFO) << "KVTManager initialized";
+    kvt_manager_->initialize(tx_service_.get(), &catalog_factory_);
+    LOG(INFO) << "KVTManager initialized with tx_service and catalog";
     
     // HACK: Start comprehensive test in background thread
     kvt_manager_->startTestInBackground();

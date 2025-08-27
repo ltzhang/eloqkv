@@ -134,7 +134,7 @@ Where `cmd` and `args` can be:
 
 The implementation should be stand alone, using tx_service only, not using any EloqKV related code (such as the classes in eloqkv/include). Currently we use existing EloqKV framework to construct a KVTManager object and pass command string into it (through handleCommand()), other than that, nothing in RedisServiceImpl should be used. 
 
-We should try to have modifications limited in KVTManager.h and KVTManager.cpp, unless absolutely necessary. We should make the code simple, try not to over engineer as we only need to deal with the opaque string:string KV operations. We treat the implementation as a prototype, not a toy, so we cannot over-simpify too much and violate the fundmental functionality (e.g. ACID properties). 
+We should try to have modifications limited in KVTManager.h and KVTManager.cpp, unless absolutely necessary. We should make the code simple, try not to over engineer as we only need to deal with the opaque string:string KV operations. Must utilize tx_service and properly implement transactions so that we do not violate the fundmental functionality (e.g. ACID properties). This means that we cannot use in memory storage (e.g. std::map) for mockup. We can use such data structure in test code as a verifier. 
 
 However, we should learn from EloqKV and its RedisServiceImpl to learn how a transaction is carried out. In particular, the BEGIN/COMMIT/ROLLBACK commands (which store a txm in RedisConnectionContext) path is a good reference. Inside this block put/get command are also handled. 
 

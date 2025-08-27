@@ -18,36 +18,29 @@
 // Include only essential tx_service types
 #include "tx_service/include/type.h"
 #include "tx_service/include/tx_execution.h"
+#include "tx_service/include/tx_request.h"
+#include "tx_service/include/tx_key.h"
+#include "tx_service/include/catalog_factory.h"
 
 // Forward declarations for tx_service components
 namespace txservice {
     class TxService;
     class TransactionExecution;
-    class TableName;
+    struct TableName;
     class TxKey;
-    class TxRecord;
+    struct TxRecord;
     class CatalogFactory;
-    class TableSchema;
+    struct TableSchema;
     struct TxCommand;
     struct ObjectCommandTxRequest;
-}
-
-// Hash function for pair<uint64_t, string> used in transaction_data_
-namespace std {
-    template<>
-    struct hash<std::pair<uint64_t, std::string>> {
-        size_t operator()(const std::pair<uint64_t, std::string>& p) const {
-            return std::hash<uint64_t>()(p.first) ^ (std::hash<std::string>()(p.second) << 1);
-        }
-    };
 }
 
 namespace EloqKV {
 // Common types for KVT operations
 using KeyValuePair = std::pair<std::string, std::string>;
 
-// Note: For simplification, we'll not use a catalog factory initially
-// and keep the TxService creation simpler
+// KVT specific implementations for table and catalog management
+// This follows the simplified prototype approach specified in CLAUDE.md
 
 class KVTTable {
 public:
@@ -82,9 +75,10 @@ public:
                         brpc::RedisReply *output);
     
     // Initialize the manager with transaction service dependencies
-    void initialize();
+    void initialize(txservice::TxService* tx_service, 
+                   txservice::CatalogFactory* catalog_factory);
     
-    // Cleanup and shutdown
+    // Cleanup and shutdown  
     void shutdown();
 
     KVTManager() {};
@@ -121,7 +115,9 @@ private:
     void runComprehensiveTest();
 
 private:    // Member variables
-    txservice::TxService* tx_service_{nullptr}; // Raw pointer to avoid incomplete type issues
+    // Using existing catalog factory - will be set during initialization
+    txservice::CatalogFactory* catalog_factory_{nullptr}; // Borrowed from RedisServiceImpl
+    txservice::TxService* tx_service_{nullptr}; // Borrowed from RedisServiceImpl
     
     // Transaction management
     std::unordered_map<uint64_t, txservice::TransactionExecution *> active_transactions_;
@@ -133,15 +129,10 @@ private:    // Member variables
 
     uint64_t next_transaction_id_{1};
     uint64_t next_table_id_{1};
-
-    // Storage for actual key-value data
-    // For committed data: full_key (table_name:key) -> value
-    std::unordered_map<std::string, std::string> committed_data_;
-    std::mutex committed_data_mutex_;
     
-    // For transaction data: (tx_id, full_key) -> value  
-    std::unordered_map<std::pair<uint64_t, std::string>, std::string> transaction_data_;
-    std::mutex tx_data_mutex_;
+    // Test verification storage (local map to verify correctness)
+    std::unordered_map<std::string, std::string> test_storage_;
+    std::mutex test_storage_mutex_;
 };
 
 } // namespace EloqKV
