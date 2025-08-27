@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-EloqKV is a high-performance distributed key-value database with Redis/ValKey API compatibility. It provides ACID transactions, full elasticity, tiered storage, and session-style transaction syntax while maintaining Redis simplicity.
+EloqKV is a high-performance distributed key-value database with Redis/ValKey API compatibility. It provides ACID transactions, full elasticity, tiered storage, and session-style transaction syntax.
 
 
 ## Build System and Commands
@@ -108,7 +108,7 @@ For transaction-aware commands:
 - Supports single-node and distributed cluster configurations
 
 # Project Goal
-We will be building a transactional key value store. Both key and value are strings (or thinly wrapped version of strings). We will have a seperate system from the current version implemented in the RedisServiceImpl, but with very similar (but simplified) functionality. A command it sent throught the existing redis framework, but immediately redirected to the KVTManager class to handle everything. KVTManager is very similar to RedisServiceImpl, but allow dynamic table creation, and can choose range partitioned table (thus supports scan operation). 
+We will be building a transactional key value store. Both key and value are strings (or thinly wrapped version of strings). We will have a seperate system from the current version implemented in the RedisServiceImpl, but with very similar functionality. A command it sent throught the existing redis framework, but immediately redirected to the KVTManager class to handle everything. KVTManager is very similar to RedisServiceImpl, but allow dynamic table creation, and can choose range partitioned table (thus supports scan operation). 
 
 A command is sent through the current framework and is directed and passed to KVTManager, and the result of the execution is returned. 
 kvt cmd args.....
@@ -134,11 +134,13 @@ Where `cmd` and `args` can be:
 
 The implementation should be stand alone, using tx_service only, not using any EloqKV related code (such as the classes in eloqkv/include). Currently we use existing EloqKV framework to construct a KVTManager object and pass command string into it (through handleCommand()), other than that, nothing in RedisServiceImpl should be used. 
 
-We should try to have modifications limited in KVTManager.h and KVTManager.cpp, unless absolutely necessary. We should make the code simple, try not to over engineer as we only need to deal with the opaque string:string KV operations. Must utilize tx_service and properly implement transactions so that we do not violate the fundmental functionality (e.g. ACID properties). This means that we cannot use in memory storage (e.g. std::map) for mockup. We can use such data structure in test code as a verifier. 
+We should try to have modifications limited in KVTManager.h and KVTManager.cpp, unless absolutely necessary. We should make the code clean, try not to over engineer as we only need to deal with the opaque string:string KV operations. Must utilize tx_service and properly and fully implement transactions so that we do not violate the fundmental functionality (e.g. ACID properties). 
 
 However, we should learn from EloqKV and its RedisServiceImpl to learn how a transaction is carried out. In particular, the BEGIN/COMMIT/ROLLBACK commands (which store a txm in RedisConnectionContext) path is a good reference. Inside this block put/get command are also handled. 
 
-## The Following is Current Transation Handling in RedisServiceImpl In our KVTManager implementation, we should follow this pattern but simplify. 
+The implementation should be aiming towards production quality, with same mechanism for transaction handling as in RedisServiceImpl (e.g. cluster mode, durability, etc.) by fully leveraging the capabilities of underlying tx_service. However, the code should be clean and simple. 
+
+## The Following is Current Transation Handling in RedisServiceImpl In our KVTManager implementation, we should follow this pattern. 
 
 ## **Transaction Lifetime Analysis in RedisServiceImpl**
 
