@@ -4954,7 +4954,7 @@ brpc::RedisCommandHandlerResult KVTCommandHandler::Run(
     EloqKV::KVTManager *kvt_manager = redis_impl_->get_kvt_manager();
     if (kvt_manager)
     {
-        kvt_manager->handleCommand(ctx, args, output);
+        kvt_manager->handleCommand(args, output);
     }
     return brpc::REDIS_CMD_HANDLED;
 }

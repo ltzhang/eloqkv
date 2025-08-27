@@ -1721,6 +1721,14 @@ bool RedisServiceImpl::Init(brpc::Server &brpc_server)
             : config_reader.GetBoolean(
                   "local", "retry_on_occ_error", FLAGS_retry_on_occ_error);
 
+    // Initialize KVTManager
+    kvt_manager_ = std::make_unique<KVTManager>();
+    kvt_manager_->initialize();
+    LOG(INFO) << "KVTManager initialized";
+    
+    // HACK: Start comprehensive test in background thread
+    kvt_manager_->startTestInBackground();
+
     return true;
 }
 
