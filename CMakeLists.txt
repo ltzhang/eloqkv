@@ -503,6 +503,8 @@ SET(RESELOQ_RESOURCES
     src/redis_stats.cpp
     src/wasm_host.cpp
     src/kvt_manager.cpp
+    src/kvt_test.cpp
+    src/kvt_stress_test.cpp
 )
 
 SET(INI_SOURCES src/ini.c src/INIReader.cpp)

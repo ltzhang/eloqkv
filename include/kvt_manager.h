@@ -23,7 +23,6 @@
 #include "tx_service/include/catalog_factory.h"
 #include "tx_service/include/tx_service.h"
 #include "tx_service/include/tx_command.h"
-#include "eloq_key.h"
 
 // Forward declarations for tx_service components
 namespace txservice {
@@ -124,6 +123,15 @@ private:
     
     // Test methods
     void runComprehensiveTest();
+    
+    // Stress test and performance benchmark methods
+    void runStressTest();
+    void runSingleThreadedStressTest();
+    void runMultiThreadedStressTest();
+    void runBenchmarkSuite();
+    void runThroughputBenchmark();
+    void runLatencyBenchmark();
+    void runConcurrencyBenchmark();
 
 private:    // Member variables
     // Using existing catalog factory - will be set during initialization
@@ -140,10 +148,6 @@ private:    // Member variables
 
     uint64_t next_transaction_id_{1};
     uint64_t next_table_id_{1};
-    
-    // Test verification storage (local map to verify correctness)
-    std::unordered_map<std::string, std::string> test_storage_;
-    std::mutex test_storage_mutex_;
 };
 
 } // namespace EloqKV
