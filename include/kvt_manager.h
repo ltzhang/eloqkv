@@ -21,6 +21,9 @@
 #include "tx_service/include/tx_request.h"
 #include "tx_service/include/tx_key.h"
 #include "tx_service/include/catalog_factory.h"
+#include "tx_service/include/tx_service.h"
+#include "tx_service/include/tx_command.h"
+#include "eloq_key.h"
 
 // Forward declarations for tx_service components
 namespace txservice {
@@ -39,8 +42,9 @@ namespace EloqKV {
 // Common types for KVT operations
 using KeyValuePair = std::pair<std::string, std::string>;
 
-// KVT specific implementations for table and catalog management
-// This follows the simplified prototype approach specified in CLAUDE.md
+// NOTE: For this prototype, we simplify TxCommand implementation
+// In a full implementation, these would be complete TxCommand implementations
+// that integrate properly with the tx_service command processing pipeline
 
 class KVTTable {
 public:
@@ -110,6 +114,13 @@ private:
     txservice::TransactionExecution* getTransaction(uint64_t tx_id);
     txservice::TransactionExecution* getOrCreateTransaction(uint64_t tx_id);
     KVTTable* getTable(const std::string& table_name);
+    
+    // Transaction execution helpers
+    txservice::TransactionExecution* newTxm(txservice::IsolationLevel iso_level,
+                                           txservice::CcProtocol protocol);
+    bool executeTxRequest(txservice::TransactionExecution* txm,
+                         txservice::ObjectCommandTxRequest* tx_req,
+                         std::string& error_msg);
     
     // Test methods
     void runComprehensiveTest();
