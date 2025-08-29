@@ -254,7 +254,7 @@ bool KVTManager::doGet(uint64_t tx_id, const std::string& table_name, const std:
     bool is_hash_table = table->partition_method() == "hash";
 
     // First put a read lock on the table
-    TableName table_name_obj(table_name, TableType::Primary, is_hash_table ? TableEngine::InternalHash : TableEngine::InternalRange);
+    TableName table_name_obj = is_hash_table ? txservice::internal_hash_table_name : txservice::internal_range_table_name;
     CatalogKey table_key(table_name_obj);
     TxKey tbl_tx_key(&table_key);
     CatalogRecord catalog_record;
@@ -289,6 +289,7 @@ bool KVTManager::doGet(uint64_t tx_id, const std::string& table_name, const std:
     // Add table name as prefix to distinguish between different KVT tables
     std::string prefixed_key = table_name + ":" + key;
     EloqStringKey key_obj(prefixed_key.data(), prefixed_key.size());
+    std::cout << "GET key: " << prefixed_key << std::endl;
     TxKey tx_key(&key_obj);
     EloqStringRecord record;
     ReadTxRequest read_req(
@@ -360,7 +361,7 @@ bool KVTManager::doSet(uint64_t tx_id, const std::string& table_name,
     bool is_hash_table = table->partition_method() == "hash";
 
     // First put a read lock on the table
-    TableName table_name_obj(table_name, TableType::Primary, is_hash_table ? TableEngine::InternalHash : TableEngine::InternalRange);
+    TableName table_name_obj = is_hash_table ? txservice::internal_hash_table_name : txservice::internal_range_table_name;
     CatalogKey table_key(table_name_obj);
     TxKey tbl_tx_key(&table_key);
     CatalogRecord catalog_record;
@@ -465,7 +466,7 @@ bool KVTManager::doScan(uint64_t tx_id, const std::string& table_name,
 
 
     // First put a read lock on the table
-    TableName table_name_obj(table_name, TableType::Primary, TableEngine::InternalRange);
+    TableName table_name_obj = txservice::internal_range_table_name;
     CatalogKey table_key(table_name_obj);
     TxKey tbl_tx_key(&table_key);
     CatalogRecord catalog_record;

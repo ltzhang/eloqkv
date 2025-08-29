@@ -121,6 +121,8 @@ SET(ELOQ_RESOURCES
     ${TX_SERVICE_SOURCE_DIR}/src/remote/cc_node_service.cpp
     ${TX_SERVICE_SOURCE_DIR}/src/remote/cc_stream_receiver.cpp
     ${TX_SERVICE_SOURCE_DIR}/src/remote/cc_stream_sender.cpp
+    ${TX_SERVICE_SOURCE_DIR}/src/eloq_string_key_record.cpp
+    ${TX_SERVICE_SOURCE_DIR}/src/eloq_basic_catalog_factory.cpp
     ${TX_SERVICE_SOURCE_DIR}/src/fault/log_replay_service.cpp
     ${TX_SERVICE_SOURCE_DIR}/src/fault/cc_node.cpp
     ${TX_SERVICE_SOURCE_DIR}/src/fault/fault_inject.cpp
