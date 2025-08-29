@@ -499,6 +499,10 @@ bool RedisServiceImpl::Init(brpc::Server &brpc_server)
         prebuilt_tables.try_emplace(redis_table_name, image);
     }
 
+    prebuilt_tables.try_emplace(txservice::sequence_table_name, "sequences_table");
+    prebuilt_tables.try_emplace(txservice::internal_hash_table_name, "internal_hash_table");
+    prebuilt_tables.try_emplace(txservice::internal_range_table_name, "internal_range_table");
+
     std::string txlog_service =
         !CheckCommandLineFlagIsDefault("txlog_service_list")
             ? FLAGS_txlog_service_list
