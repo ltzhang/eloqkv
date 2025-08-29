@@ -15,13 +15,14 @@
 #include <chrono>
 #include <cassert>
 #include <iostream>
+#include "tx_service/include/eloq_string_key_record.h"
 #include <unordered_map>
 
 namespace EloqKV {
 
 // NOTE: KVTCommand implementations removed for prototype simplicity
 // In a full implementation, these would be complete TxCommand classes
-
+using namespace txservice;
 
 void KVTManager::handleCommand(const std::vector<butil::StringPiece> &args,
                               brpc::RedisReply *output) {
@@ -185,30 +186,8 @@ uint64_t KVTManager::doCreateTable(const std::string& table_name, const std::str
         return 0;
     }
     
-    if (!catalog_factory_) {
-        error_msg = "CatalogFactory not initialized";
-        return 0;
-    }
-    
-    // Create table using catalog factory - following RedisServiceImpl pattern
-    auto tx_table_name = std::make_unique<txservice::TableName>(
-        table_name, 
-        txservice::TableType::Primary, 
-        txservice::TableEngine::EloqKv
-    );
-    
-    // Create table schema using catalog factory
-    uint64_t version = 1;
-    std::string catalog_image = "kvt_simple_string_kv"; // Simple catalog image for KV table
-    auto table_schema = catalog_factory_->CreateTableSchema(*tx_table_name, catalog_image, version);
-    
-    if (!table_schema) {
-        error_msg = "Failed to create table schema for " + table_name;
-        return 0;
-    }
-    
     // Create and store the KVTTable
-    auto kvt_table = std::make_unique<KVTTable>(table_name, partition_method, std::move(tx_table_name));
+    auto kvt_table = std::make_unique<KVTTable>(table_name, partition_method);
     tables_[table_name] = std::move(kvt_table);
     
     uint64_t table_id = next_table_id_++;
@@ -223,9 +202,6 @@ uint64_t KVTManager::doStartTx(std::string& error_msg) {
         return 0;
     }
     
-    std::lock_guard<std::mutex> lock(transactions_mutex_);
-    uint64_t tx_id = next_transaction_id_++;
-    
     // Create a new transaction execution object using tx_service
     // Use default isolation level and concurrency control protocol
     txservice::TransactionExecution* txm = newTxm(
@@ -238,6 +214,8 @@ uint64_t KVTManager::doStartTx(std::string& error_msg) {
         return 0;
     }
     
+    std::lock_guard<std::mutex> lock(transactions_mutex_);
+    uint64_t tx_id = next_transaction_id_++;
     active_transactions_[tx_id] = txm;
     
     //std::cout << "Started transaction " << tx_id << " with txm: " << txm << std::endl;
@@ -251,14 +229,7 @@ bool KVTManager::doGet(uint64_t tx_id, const std::string& table_name, const std:
         error_msg = "Table " + table_name + " not found";
         return false;
     }
-    
-    // For prototype: demonstrate tx_service integration points without complex TxCommand
-    // In a full implementation:
-    // 1. Create EloqKey from string key
-    // 2. Create custom KVTGetCommand extending TxCommand
-    // 3. Create ObjectCommandTxRequest with the command
-    // 4. Execute via tx_service and extract results
-    
+
     // Get or create transaction
     txservice::TransactionExecution* txm = nullptr;
     bool auto_commit = (tx_id == 0);
@@ -279,79 +250,74 @@ bool KVTManager::doGet(uint64_t tx_id, const std::string& table_name, const std:
         }
         //std::cout << "GET validated against transaction " << tx_id << " (txm: " << txm << ")" << std::endl;
     }
-    
-    try {
-        // Create TxKey for the key
-        txservice::TxKey tx_key = txservice::TxKeyFactory::CreateTxKey(key.data(), key.size());
-        
-        // Create a TxRecord to receive the result
-        auto result_record = std::make_unique<txservice::BlobTxRecord>();
-        
-        // Create ReadTxRequest for GET operation
-        txservice::ReadTxRequest read_req(
-            table->table_name(),           // table_name
-            0,                             // schema_version
-            &tx_key,                       // key
-            result_record.get(),           // record to store result
-            false,                         // is_for_write
-            false,                         // is_for_share
-            false,                         // read_local
-            0,                             // ts
-            false,                         // is_covering_keys
-            false,                         // is_recovering
-            false,                         // point_read_on_cache_miss
-            nullptr,                       // yield_fptr
-            nullptr,                       // resume_fptr
-            txm                            // txm
-        );
-        
-        // Execute the request through tx_service
-        txm->ProcessTxRequest(read_req);
-        
-        // Wait for result
-        read_req.Wait();
-        
-        // Check for errors
-        if (read_req.IsError()) {
-            error_msg = "GET operation failed: " + read_req.ErrorMsg();
-            if (auto_commit) {
-                txservice::AbortTx(txm);
-            }
-            return false;
-        } else {
-            // Extract result from the request
-            auto result_pair = read_req.Result();
-            txservice::RecordStatus status = result_pair.first;
-            
-            if (status == txservice::RecordStatus::Normal) {
-                // Key exists, get value from record
-                value = result_record->ToString();
-                //std::cout << "GET " << table_name << ":" << key << " tx_id=" << tx_id << " found: '" << value << "'" << std::endl;
-            } else {
-                // Key doesn't exist or other status
-                value = "";
-                //std::cout << "GET " << table_name << ":" << key << " tx_id=" << tx_id << " not found" << std::endl;
-            }
-        }
-        
-        // Auto-commit if needed
+
+    bool is_hash_table = table->partition_method() == "hash";
+
+    // First put a read lock on the table
+    TableName table_name_obj(table_name, TableType::Primary, is_hash_table ? TableEngine::InternalHash : TableEngine::InternalRange);
+    CatalogKey table_key(table_name_obj);
+    TxKey tbl_tx_key(&table_key);
+    CatalogRecord catalog_record;
+
+
+    ReadTxRequest read_tx_req(&catalog_ccm_name, 0, &tbl_tx_key,
+        &catalog_record, false, false, true, 0, false,
+        false, false, nullptr,
+        nullptr, txm);
+    txm->Execute(&read_tx_req);
+    read_tx_req.Wait();
+    if (read_tx_req.ErrorCode() != TxErrorCode::NO_ERROR) {
+        error_msg = "GET operation failed: " + std::to_string(static_cast<int>(read_tx_req.ErrorCode()));
         if (auto_commit) {
-            auto commit_result = txservice::CommitTx(txm);
-            if (!commit_result.first) {
-                error_msg = "Failed to commit GET transaction: " + std::to_string(static_cast<int>(commit_result.second));
-                return false;
-            }
-            //std::cout << "GET auto-commit transaction committed" << std::endl;
+            txservice::AbortTx(txm);
         }
-        
-    } catch (const std::exception& e) {
-        error_msg = "GET operation failed: " + std::string(e.what());
+        return false;
+    }   
+    RecordStatus rec_status= read_tx_req.Result().first;
+
+    if (rec_status == RecordStatus::Deleted) {
+        // Table not exist
+        error_msg = "Table " + table_name + " not found";
         if (auto_commit) {
             txservice::AbortTx(txm);
         }
         return false;
     }
-    
+
+    uint64_t schema_version = catalog_record.SchemaTs();
+
+    // Add table name as prefix to distinguish between different KVT tables
+    std::string prefixed_key = table_name + ":" + key;
+    EloqStringKey key_obj(prefixed_key.data(), prefixed_key.size());
+    TxKey tx_key(&key_obj);
+    EloqStringRecord record;
+    ReadTxRequest read_req(
+        &table_name_obj, schema_version, &tx_key,
+        &record, false, false, false, 0, false,
+        false, false, nullptr, nullptr, txm);
+    txm->Execute(&read_req);
+    read_req.Wait();
+    if (read_req.ErrorCode() != TxErrorCode::NO_ERROR) {
+        error_msg = "GET operation failed: " + std::to_string(static_cast<int>(read_req.ErrorCode()));
+        if (auto_commit) {
+            txservice::AbortTx(txm);
+        }
+        return false;
+    }   
+    rec_status= read_req.Result().first;
+    if (rec_status == RecordStatus::Deleted) {
+        error_msg = "Key " + key + " not found";
+        return false;
+    }
+    value = record.ToString();
+
+    if (auto_commit) {
+        auto commit_result = txservice::CommitTx(txm);
+        if (!commit_result.first) {
+            error_msg = "Failed to commit GET transaction: " + std::to_string(static_cast<int>(commit_result.second));
+            return false;
+        }
+    }
     return true;
 }
 
@@ -390,54 +356,71 @@ bool KVTManager::doSet(uint64_t tx_id, const std::string& table_name,
         }
         //std::cout << "SET validated against transaction " << tx_id << " (txm: " << txm << ")" << std::endl;
     }
-    
-    try {
-        // Create EloqKey for the key
-        auto eloq_key = std::make_unique<EloqKey>(key.data(), key.size());
-        
-        // Create SetCommand with the value
-        auto set_command = std::make_unique<SetCommand>(value);
-        
-        // Create ObjectCommandTxRequest
-        txservice::ObjectCommandTxRequest tx_req(
-            table->table_name(),           // table_name
-            eloq_key.get(),                // key 
-            set_command.get(),             // command
-            auto_commit,                   // auto_commit
-            false,                         // always_redirect  
-            txm                            // txm
-        );
-        
-        // Execute the request through tx_service
-        txm->ProcessTxRequest(tx_req);
-        
-        // Check for errors
-        if (tx_req.IsError()) {
-            error_msg = "SET operation failed: " + std::to_string(static_cast<int>(tx_req.ErrorCode()));
-            if (auto_commit) {
-                txservice::AbortTx(txm);
-            }
-            return false;
-        }
-        
-        // Auto-commit if needed
-        if (auto_commit) {
-            auto commit_result = txservice::CommitTx(txm);
-            if (!commit_result.first) {
-                error_msg = "Failed to commit SET transaction: " + std::to_string(static_cast<int>(commit_result.second));
-                return false;
-            }
-            //std::cout << "SET auto-commit transaction committed" << std::endl;
-        }
-        
-    } catch (const std::exception& e) {
-        error_msg = "SET operation failed: " + std::string(e.what());
+
+    bool is_hash_table = table->partition_method() == "hash";
+
+    // First put a read lock on the table
+    TableName table_name_obj(table_name, TableType::Primary, is_hash_table ? TableEngine::InternalHash : TableEngine::InternalRange);
+    CatalogKey table_key(table_name_obj);
+    TxKey tbl_tx_key(&table_key);
+    CatalogRecord catalog_record;
+
+
+    ReadTxRequest read_tx_req(&catalog_ccm_name, 0, &tbl_tx_key,
+        &catalog_record, false, false, true, 0, false,
+        false, false, nullptr,
+        nullptr, txm);
+    txm->Execute(&read_tx_req);
+    read_tx_req.Wait();
+    RecordStatus rec_status= read_tx_req.Result().first;
+
+    if (rec_status == RecordStatus::Deleted) {
+        // Table not exist
+        error_msg = "Table " + table_name + " not found";
         if (auto_commit) {
             txservice::AbortTx(txm);
         }
         return false;
     }
-    
+
+    uint64_t schema_version = catalog_record.SchemaTs();
+
+    // Add table name as prefix to distinguish between different KVT tables
+    std::string prefixed_key = table_name + ":" + key;
+    EloqStringKey key_obj(prefixed_key.data(), prefixed_key.size());
+    TxKey tx_key(&key_obj);
+    EloqStringRecord record;
+    ReadTxRequest read_req(
+        &table_name_obj, schema_version, &tx_key,
+        &record, true, false, false, 0, false,
+        false, false, nullptr, nullptr, txm);
+    txm->Execute(&read_req);
+    read_req.Wait();
+    rec_status= read_req.Result().first;
+
+    if (read_req.ErrorCode() != TxErrorCode::NO_ERROR) {
+        error_msg = "SET operation failed: " + std::to_string(static_cast<int>(read_req.ErrorCode()));
+        if (auto_commit) {
+            txservice::AbortTx(txm);
+        }
+        return false;
+    }
+
+    // We need to pass in ownership of key and record to the txm
+    EloqStringRecord::Uptr record_ptr = std::make_unique<EloqStringRecord>();
+    std::unique_ptr<EloqStringKey> key_ptr = std::make_unique<EloqStringKey>(prefixed_key.data(), prefixed_key.size());
+    record_ptr->SetEncodedBlob(reinterpret_cast<const unsigned char *>(value.data()), value.size());
+    OperationType op_type = read_req.Result().first == RecordStatus::Deleted ? OperationType::Insert : OperationType::Update;
+
+    txm->TxUpsert(table_name_obj, schema_version, TxKey(std::move(key_ptr)), std::move(record_ptr), op_type);
+
+    if (auto_commit) {
+        auto commit_result = txservice::CommitTx(txm);
+        if (!commit_result.first) {
+            error_msg = "Failed to commit SET transaction: " + std::to_string(static_cast<int>(commit_result.second));
+            return false;
+        }
+    }
     //std::cout << "SET " << table_name << ":" << key << "='" << value << "' tx_id=" << tx_id << std::endl;
     return true;
 }
@@ -474,119 +457,145 @@ bool KVTManager::doScan(uint64_t tx_id, const std::string& table_name,
         }
         //std::cout << "SCAN validated against transaction " << tx_id << " (txm: " << txm << ")" << std::endl;
     }
-    
-    try {
-        // Create EloqKeys for start and end
-        EloqKey start_eloq_key(key_start.data(), key_start.size());
-        EloqKey end_eloq_key(key_end.data(), key_end.size());
-        
-        // Create TxKeys from EloqKeys
-        txservice::TxKey start_tx_key(&start_eloq_key);
-        txservice::TxKey end_tx_key(&end_eloq_key);
-        
-        // Get schema version (simplified for prototype)
-        uint64_t schema_version = 1;
-        
-        // Create ScanOpenTxRequest
-        txservice::ScanOpenTxRequest scan_open(
-            table->table_name(),                    // table_name
-            schema_version,                         // schema_version 
-            txservice::ScanIndexType::Primary,     // index_type
-            &start_tx_key,                          // start_key
-            true,                                   // start_inclusive
-            &end_tx_key,                            // end_key
-            true,                                   // end_inclusive
-            txservice::ScanDirection::Forward,     // direction
-            false,                                  // is_ckpt
-            false,                                  // is_for_write
-            false,                                  // is_for_share
-            false,                                  // is_covering_keys
-            true,                                   // is_require_keys
-            true,                                   // is_require_recs
-            true,                                   // is_require_sort
-            false,                                  // is_read_local
-            nullptr,                                // yield_fptr
-            nullptr,                                // resume_fptr
-            txm                                     // txm
-        );
-        
-        // Execute the scan open request through ProcessTxRequest
-        txm->ProcessTxRequest(scan_open);
-        
-        // Get scan alias from result
-        uint64_t scan_alias = scan_open.Result();
-        if (scan_alias == UINT64_MAX) {
-            error_msg = "Failed to open scan - invalid alias";
-            if (auto_commit) {
-                txservice::AbortTx(txm);
-            }
-            return false;
-        }
-        
-        // Fetch results using ScanBatchTxRequest
-        std::vector<txservice::ScanBatchTuple> batch_results;
-        txservice::ScanBatchTxRequest scan_batch(
-            scan_alias,                             // alias
-            *table->table_name(),                   // table_name
-            &batch_results,                         // batch_vec
-            nullptr,                                // yield_fptr
-            nullptr,                                // resume_fptr
-            txm                                     // txm
-        );
-        
-        size_t total_fetched = 0;
-        while (total_fetched < num_item_limit) {
-            batch_results.clear();
-            
-            // Execute scan batch request
-            txm->ProcessTxRequest(scan_batch);
-            
-            if (batch_results.empty()) {
-                // No more results
-                break;
-            }
-            
-            // Process batch results
-            for (const auto& tuple : batch_results) {
-                if (total_fetched >= num_item_limit) break;
-                
-                // Extract key and value from ScanBatchTuple
-                if (tuple.record_) {
-                    // Get key using GetKey template method
-                    const EloqKey* eloq_key = tuple.key_.GetKey<EloqKey>();
-                    std::string key = eloq_key ? eloq_key->ToString() : "";
-                    
-                    // Get value from RedisEloqObject (simplified for prototype)
-                    std::string value;
-                    const RedisEloqObject* redis_obj = static_cast<const RedisEloqObject*>(tuple.record_);
-                    if (redis_obj) {
-                        value = redis_obj->ToString();
-                    }
-                    
-                    results.push_back({key, value});
-                    total_fetched++;
-                }
-            }
-        }
-        
-        // Auto-commit if needed
+
+    if (table->partition_method() == "hash") {
+        error_msg = "SCAN is not supported for hash tables";
+        return false;
+    }
+
+
+    // First put a read lock on the table
+    TableName table_name_obj(table_name, TableType::Primary, TableEngine::InternalRange);
+    CatalogKey table_key(table_name_obj);
+    TxKey tbl_tx_key(&table_key);
+    CatalogRecord catalog_record;
+
+
+    ReadTxRequest read_tx_req(&catalog_ccm_name, 0, &tbl_tx_key,
+        &catalog_record, false, false, true, 0, false,
+        false, false, nullptr,
+        nullptr, txm);
+    txm->Execute(&read_tx_req);
+    read_tx_req.Wait();
+    RecordStatus rec_status= read_tx_req.Result().first;
+
+    if (rec_status == RecordStatus::Deleted) {
+        // Table not exist
+        error_msg = "Table " + table_name + " not found";
         if (auto_commit) {
-            auto commit_result = txservice::CommitTx(txm);
-            if (!commit_result.first) {
-                error_msg = "Failed to commit scan transaction: " + std::to_string(static_cast<int>(commit_result.second));
-                return false;
-            }
-            //std::cout << "SCAN auto-commit transaction committed" << std::endl;
+            txservice::AbortTx(txm);
         }
-        
-    } catch (const std::exception& e) {
-        error_msg = "Scan operation failed: " + std::string(e.what());
+        return false;
+    }
+
+    uint64_t schema_version = catalog_record.SchemaTs();
+
+    // Add table name as prefix to distinguish between different KVT tables
+    std::string prefixed_start_key = table_name + ":" + key_start;
+    std::string prefixed_end_key = table_name + ":" + key_end;
+    EloqStringKey start_key_obj(prefixed_start_key.data(), prefixed_start_key.size());
+    EloqStringKey end_key_obj(prefixed_end_key.data(), prefixed_end_key.size());
+    TxKey start_tx_key(&start_key_obj);
+    TxKey end_tx_key(&end_key_obj);
+
+    // Create ScanOpenTxRequest
+    txservice::ScanOpenTxRequest scan_open(
+        &table_name_obj,                    // table_name
+        schema_version,                         // schema_version 
+        txservice::ScanIndexType::Primary,     // index_type
+        &start_tx_key,                          // start_key
+        true,                                   // start_inclusive
+        &end_tx_key,                            // end_key
+        true,                                   // end_inclusive
+        txservice::ScanDirection::Forward,     // direction
+        false,                                  // is_ckpt
+        false,                                  // is_for_write
+        false,                                  // is_for_share
+        false,                                  // is_covering_keys
+        true,                                   // is_require_keys
+        true,                                   // is_require_recs
+        true,                                   // is_require_sort
+        false,                                  // is_read_local
+        nullptr,                                // yield_fptr
+        nullptr,                                // resume_fptr
+        txm                                     // txm
+    );
+
+    
+    // Get scan alias from result
+    uint64_t scan_alias = txm->OpenTxScan(scan_open);
+    
+    if (scan_alias == UINT64_MAX) {
+        error_msg = "Failed to open scan - invalid alias";
         if (auto_commit) {
             txservice::AbortTx(txm);
         }
         return false;
     }
     
+    // Fetch results using ScanBatchTxRequest
+    std::vector<txservice::ScanBatchTuple> batch_results;
+    txservice::ScanBatchTxRequest scan_batch(
+        scan_alias,                             // alias
+        table_name_obj,                   // table_name
+        &batch_results,                         // batch_vec
+        nullptr,                                // yield_fptr
+        nullptr,                                // resume_fptr
+        txm                                     // txm
+    );
+    
+    size_t total_fetched = 0;
+    while (total_fetched < num_item_limit) {
+        batch_results.clear();
+        
+        // Execute scan batch request
+        txm->ProcessTxRequest(scan_batch);
+        
+        if (batch_results.empty()) {
+            // No more results
+            break;
+        }
+        
+        // Process batch results
+        for (const auto& tuple : batch_results) {
+            if (total_fetched >= num_item_limit) break;
+            
+            // Extract key and value from ScanBatchTuple
+            if (tuple.record_ && tuple.status_ != RecordStatus::Deleted) {
+                // Get key using GetKey template method
+                const EloqStringKey* eloq_key = tuple.key_.GetKey<EloqStringKey>();
+                std::string prefixed_key = eloq_key ? eloq_key->ToString() : "";
+                
+                // Strip table name prefix from the key
+                std::string key = prefixed_key;
+                size_t colon_pos = prefixed_key.find(table_name + ":");
+                if (colon_pos != std::string::npos) {
+                    key = prefixed_key.substr(colon_pos + 1);
+                }
+
+                // Get value from EloqStringRecord
+                std::string value;
+                const EloqStringRecord* eloq_record = static_cast<const EloqStringRecord*>(tuple.record_);
+                if (eloq_record) {
+                    value = eloq_record->ToString();
+                }
+                
+                results.push_back({key, value});
+                total_fetched++;
+            }
+        }
+    }
+    
+    // Auto-commit if needed
+    if (auto_commit) {
+        auto commit_result = txservice::CommitTx(txm);
+        if (!commit_result.first) {
+            error_msg = "Failed to commit scan transaction: " + std::to_string(static_cast<int>(commit_result.second));
+            return false;
+        }
+        //std::cout << "SCAN auto-commit transaction committed" << std::endl;
+    }
+
 /*    std::cout << "SCAN " << table_name << " from '" << key_start << "' to '" << key_end 
               << "' limit=" << num_item_limit << " tx_id=" << tx_id 
               << " found " << results.size() << " items" << std::endl;

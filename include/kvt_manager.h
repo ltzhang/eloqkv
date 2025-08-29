@@ -47,19 +47,15 @@ using KeyValuePair = std::pair<std::string, std::string>;
 
 class KVTTable {
 public:
-    KVTTable(const std::string& name, const std::string& partition_method, 
-             std::unique_ptr<txservice::TableName> table_name)
-        : name_(name), partition_method_(partition_method), 
-          table_name_(std::move(table_name)) {}
+    KVTTable(const std::string& name, const std::string& partition_method)
+        : name_(name), partition_method_(partition_method) {}
     
     const std::string& name() const { return name_; }
     const std::string& partition_method() const { return partition_method_; }
-    const txservice::TableName* table_name() const { return table_name_.get(); }
 
 private:
     std::string name_;
     std::string partition_method_;
-    std::unique_ptr<txservice::TableName> table_name_;
 };
 
 /**
