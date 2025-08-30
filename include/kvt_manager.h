@@ -94,6 +94,8 @@ public:
                 std::string& value, std::string& error_msg);
     bool doSet(uint64_t tx_id, const std::string& table_name, 
                 const std::string& key, const std::string& value, std::string& error_msg);
+    bool doDel(uint64_t tx_id, const std::string& table_name, 
+                const std::string& key, std::string& error_msg);
     bool doScan(uint64_t tx_id, const std::string& table_name, 
                 const std::string& key_start, const std::string& key_end, size_t num_item_limit, 
                 std::vector<std::pair<std::string, std::string>>& results,

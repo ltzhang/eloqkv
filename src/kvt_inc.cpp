@@ -59,7 +59,16 @@ public:
         }
         return manager_->doSet(tx_id, table_name, key, value, error_msg);
     }
-    
+
+    bool del(uint64_t tx_id, const std::string& table_name, 
+        const std::string& key, std::string& error_msg) {
+        if (!manager_) {
+            error_msg = "KVTManager not initialized";
+            return false;
+        }
+        return manager_->doDel(tx_id, table_name, key, error_msg);
+    }
+
     bool scan(uint64_t tx_id, const std::string& table_name,
              const std::string& key_start, const std::string& key_end,
              size_t num_item_limit, std::vector<std::pair<std::string, std::string>>& results,

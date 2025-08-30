@@ -35,7 +35,7 @@ void test_basic_operations() {
     }
     
     // One-shot SET operation
-    if (kvt_set_oneshot("users", "user:1", "Alice", error)) {
+    if (kvt_set(0, "users", "user:1", "Alice", error)) {
         std::cout << "✓ Set user:1 = Alice" << std::endl;
     } else {
         std::cerr << "Failed to set: " << error << std::endl;
@@ -43,7 +43,7 @@ void test_basic_operations() {
     
     // One-shot GET operation
     std::string value;
-    if (kvt_get_oneshot("users", "user:1", value, error)) {
+    if (kvt_get(0, "users", "user:1", value, error)) {
         std::cout << "✓ Retrieved user:1 = " << value << std::endl;
         assert(value == "Alice");
     } else {
@@ -51,12 +51,12 @@ void test_basic_operations() {
     }
     
     // Update the value
-    if (kvt_set_oneshot("users", "user:1", "Alice Smith", error)) {
+    if (kvt_set(0, "users", "user:1", "Alice Smith", error)) {
         std::cout << "✓ Updated user:1 = Alice Smith" << std::endl;
     }
     
     // Verify the update
-    if (kvt_get_oneshot("users", "user:1", value, error)) {
+    if (kvt_get(0, "users", "user:1", value, error)) {
         std::cout << "✓ Verified update: user:1 = " << value << std::endl;
         assert(value == "Alice Smith");
     }
@@ -98,7 +98,7 @@ void test_transactions() {
     }
     
     // Verify data persisted after commit
-    if (kvt_get_oneshot("users", "user:2", value, error)) {
+    if (kvt_get(0, "users", "user:2", value, error)) {
         std::cout << "✓ Verified user:2 after commit = " << value << std::endl;
         assert(value == "Bob");
     }
@@ -131,7 +131,7 @@ void test_rollback() {
     
     // Verify data was not persisted
     std::string value;
-    if (!kvt_get_oneshot("users", "user:4", value, error)) {
+    if (!kvt_get(0, "users", "user:4", value, error)) {
         std::cout << "✓ Verified user:4 does not exist after rollback" << std::endl;
     } else {
         std::cerr << "ERROR: user:4 should not exist after rollback!" << std::endl;
@@ -152,16 +152,16 @@ void test_range_scan() {
     std::cout << "✓ Created range-partitioned table 'products' with ID: " << table_id << std::endl;
     
     // Insert some products
-    kvt_set_oneshot("products", "prod:001", "Laptop", error);
-    kvt_set_oneshot("products", "prod:002", "Mouse", error);
-    kvt_set_oneshot("products", "prod:003", "Keyboard", error);
-    kvt_set_oneshot("products", "prod:004", "Monitor", error);
-    kvt_set_oneshot("products", "prod:005", "Headphones", error);
+    kvt_set(0, "products", "prod:001", "Laptop", error);
+    kvt_set(0, "products", "prod:002", "Mouse", error);
+    kvt_set(0, "products", "prod:003", "Keyboard", error);
+    kvt_set(0, "products", "prod:004", "Monitor", error);
+    kvt_set(0, "products", "prod:005", "Headphones", error);
     std::cout << "✓ Inserted 5 products" << std::endl;
     
     // Scan a range
     std::vector<std::pair<std::string, std::string>> results;
-    if (kvt_scan_oneshot("products", "prod:002", "prod:004", 10, results, error)) {
+    if (kvt_scan(0, "products", "prod:002", "prod:004", 10, results, error)) {
         std::cout << "✓ Scan from prod:002 to prod:004 returned " << results.size() << " items:" << std::endl;
         for (const auto& [key, value] : results) {
             std::cout << "  " << key << " = " << value << std::endl;
@@ -208,10 +208,10 @@ void test_concurrent_transactions() {
     
     // Verify both changes persisted
     std::string value;
-    kvt_get_oneshot("users", "user:10", value, error);
+    kvt_get(0, "users", "user:10", value, error);
     std::cout << "✓ Verified user:10 = " << value << std::endl;
     
-    kvt_get_oneshot("users", "user:11", value, error);
+    kvt_get(0, "users", "user:11", value, error);
     std::cout << "✓ Verified user:11 = " << value << std::endl;
 }
 

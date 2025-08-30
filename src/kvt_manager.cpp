@@ -426,6 +426,17 @@ bool KVTManager::doSet(uint64_t tx_id, const std::string& table_name,
     return true;
 }
 
+bool KVTManager::doDel(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+                      std::string& error_msg) {
+    KVTTable* table = getTable(table_name);
+    if (!table) {
+        error_msg = "Table " + table_name + " not found";
+        return false;
+    }
+    assert(0 && " Not Implemented Yet");
+}
+
+
 bool KVTManager::doScan(uint64_t tx_id, const std::string& table_name, 
                        const std::string& key_start, const std::string& key_end, size_t num_item_limit, 
                        std::vector<std::pair<std::string, std::string>>& results,
