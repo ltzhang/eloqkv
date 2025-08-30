@@ -1,0 +1,9 @@
+kvt_inc.h is an interface for a key-value transactional database. Now we want to implement a in-memory version of the database. 
+
+The database use a std::map to store data. We use a hash map to track table_name to table mapping. A table is just a std::map<string, Value>. The Value is a string value and some metadata. The metadata could be a lock flag (just a boolean value, as for pessimistic concurrency control 2 phase locking, 2PL) or a version number (as for opportunistic concurrency control, OCC). All the tables are protected by a mutex and can only be accessed from a single thread. 
+
+We also have a set of transactions and they are tracked by a map from TxID -> Transaction. Each transaction context tracks read and written key values. When reading from KV, the key Value being read and the key and Value being written are kept in the transaction context (and the locks are aquired or versions are tracked, depending on 2PL or OCC). Inside the transaction context, both table and key form the actual key (to track which table have the key). The simplest way is to use a concatinated key with a speration symbole between table name and key (e.g. 0x00). If a read from client is for a key that has already been accessed in the transaction (i.e. being get/put before), then the value in the transaction context should be returned (instead of reading from Table KV Map). 
+
+At the transaction commit time, for 2PL the locks are being released, and new values are installed in the Tables. For the OCC case, the versions are checked to see if all data read are still the same version. If not, we need to fail the commit. In the abort/rollback case, we just abandon the locally modified values, and release locks properly. 
+
+The entire code of in-memory transactional database is implemented in two files: kvt_mem.h and kvt_mem.cpp. 

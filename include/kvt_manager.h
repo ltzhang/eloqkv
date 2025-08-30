@@ -86,11 +86,7 @@ public:
 
     void startTestInBackground();
 
-private:
-    KVTManager(const KVTManager&) = delete;
-    KVTManager& operator=(const KVTManager&) = delete;
-
-    // Business logic methods (doXXXX) - called by handleCommand
+    // Business logic methods (doXXXX) - exposed for external API usage
     uint64_t doCreateTable(const std::string& table_name, const std::string& partition_method, 
                           std::string& error_msg);
     uint64_t doStartTx(std::string& error_msg); //return 0 if fails
@@ -104,6 +100,10 @@ private:
                 std::string& error_msg);
     bool doCommitTx(uint64_t tx_id, std::string& error_msg);
     bool doAbortTx(uint64_t tx_id, std::string& error_msg);
+
+private:
+    KVTManager(const KVTManager&) = delete;
+    KVTManager& operator=(const KVTManager&) = delete;
     
     // Helper methods
     txservice::TransactionExecution* getTransaction(uint64_t tx_id);

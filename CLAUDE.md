@@ -138,7 +138,10 @@ We should try to have modifications limited in KVTManager.h and KVTManager.cpp, 
 
 However, we should learn from EloqKV and its RedisServiceImpl to learn how a transaction is carried out. In particular, the BEGIN/COMMIT/ROLLBACK commands (which store a txm in RedisConnectionContext) path is a good reference. Inside this block put/get command are also handled. 
 
+One major difference of KVT with Redis is that currently Redis use ObjectCatalogFactory, which only support hash partition and table is fixed at the initiation time that cannot create dynamically. You need to use CatalogFactory from tx_service directly to create Range partitioned tables. You may want to use EloqSQL table engine (we can )
+
 The implementation should be aiming towards production quality, with same mechanism for transaction handling as in RedisServiceImpl (e.g. cluster mode, durability, etc.) by fully leveraging the capabilities of underlying tx_service. However, the code should be clean and simple. 
+
 
 ## The Following is Current Transation Handling in RedisServiceImpl In our KVTManager implementation, we should follow this pattern. 
 

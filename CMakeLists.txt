@@ -505,6 +505,7 @@ SET(RESELOQ_RESOURCES
     src/kvt_manager.cpp
     src/kvt_test.cpp
     src/kvt_stress_test.cpp
+    src/kvt_inc.cpp
 )
 
 SET(INI_SOURCES src/ini.c src/INIReader.cpp)
@@ -622,6 +623,25 @@ add_subdirectory(fpconv)
 # add_executable(redis_press redis_press.cpp)
 add_executable(eloqkv src/redis_server.cpp ${RESELOQ_RESOURCES})
 target_link_libraries(eloqkv ${DYNAMIC_LIB} ${RESELOQ_LIBRARY} ${ABSEIL} lua fpconv ${WASMTIME_LIBRARY})
+
+# Create static library libeloqkv.a with all sources except redis_server.cpp
+add_library(eloqkv_static STATIC ${RESELOQ_RESOURCES})
+set_target_properties(eloqkv_static PROPERTIES OUTPUT_NAME "eloqkv")
+target_link_libraries(eloqkv_static PUBLIC ${RESELOQ_LIBRARY} ${ABSEIL} lua fpconv ${WASMTIME_LIBRARY})
+
+# Export include directories for external projects
+target_include_directories(eloqkv_static PUBLIC 
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/redis>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/store_handler>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/tx_service/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/tx_service/include/cc>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/tx_service/include/remote>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/tx_service/include/fault>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/tx_service/include/store>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/eloq_metrics/include>
+    $<INSTALL_INTERFACE:include>
+)
 
 option(WITH_BOOST_STACKTRACE "With boost stack trace." OFF)
 message("WITH_BOOST_STACKTRACE: " ${WITH_BOOST_STACKTRACE})
