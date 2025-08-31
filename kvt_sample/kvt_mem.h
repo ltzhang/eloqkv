@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <cassert>
 #include <iostream>
-//#include <algorithm>
+#include <algorithm>
 
 // Forward declarations
 class Table;
@@ -249,6 +249,8 @@ class KVTManagerWrapperSimple : public KVTManagerWrapperInterface
                 error_msg = "Transaction " + std::to_string(tx_id) + " not found";
                 return false;
             }
+            
+            // Apply changes
             table_data.insert(write_set.begin(), write_set.end());
             for (const auto& key : delete_set) {
                 //when inserting into delete set, we removed it from write set.
@@ -257,6 +259,7 @@ class KVTManagerWrapperSimple : public KVTManagerWrapperInterface
                 assert (table_data.find(key) != table_data.end());
                 table_data.erase(key);
             }
+            
             write_set.clear();
             delete_set.clear();
             current_tx_id = 0;
@@ -381,6 +384,8 @@ class KVTManagerWrapperSimple : public KVTManagerWrapperInterface
             results.clear();
             std::string table_key = make_table_key(table_name, key_start);
             std::string table_key_end = make_table_key(table_name, key_end);
+            
+            // First, scan table_data for existing keys
             auto itr = table_data.lower_bound(table_key);
             auto end_itr = table_data.upper_bound(table_key_end);
             while (itr != end_itr && results.size() < num_item_limit) {
@@ -396,6 +401,30 @@ class KVTManagerWrapperSimple : public KVTManagerWrapperInterface
                 }
                 ++itr;
             }
+            
+            // CRITICAL FIX: Also include NEW keys from write_set that aren't in table_data yet
+            for (const auto& [ws_key, ws_value] : write_set) {
+                if (ws_key >= table_key && ws_key < table_key_end) {
+                    // Check if this key is not already in results (from table_data scan)
+                    if (table_data.find(ws_key) == table_data.end()) {
+                        auto [ws_table_name, ws_key_only] = parse_table_key(ws_key);
+                        if (ws_table_name == table_name) {
+                            results.emplace_back(ws_key_only, ws_value);
+                            if (results.size() >= num_item_limit) break;
+                        }
+                    }
+                }
+            }
+            
+            // Sort results by key since we added write_set items separately
+            std::sort(results.begin(), results.end(), 
+                     [](const auto& a, const auto& b) { return a.first < b.first; });
+            
+            // Trim to limit if needed
+            if (results.size() > num_item_limit) {
+                results.resize(num_item_limit);
+            }
+            
             return true;
         }
 };
@@ -937,16 +966,17 @@ public:
         for (auto itr = table->data.lower_bound(key_start); itr != table->data.end() && itr->first < key_end; ++itr) {
             if (results_writes.find(itr->first) != results_writes.end()) //already in write set, skip
                 continue;
-            if (tx->delete_set.find(itr->first) != tx->delete_set.end()) //being deleted, skip
+            std::string table_key = make_table_key(table_name, itr->first);
+            if (tx->delete_set.find(table_key) != tx->delete_set.end()) //being deleted, skip
                 continue;
-            if (tx->read_set.find(itr->first) == tx->read_set.end()) { //not in the read set, so need to read from table.
-                tx->read_set[itr->first] = itr->second;
+            if (tx->read_set.find(table_key) == tx->read_set.end()) { //not in the read set, so need to read from table.
+                tx->read_set[table_key] = itr->second;
                 results_table[itr->first] = itr->second.data;
             } else {
-                if (tx->read_set[itr->first].data != itr->second.data) {
-                    assert (tx->read_set[itr->first].metadata < itr->second.metadata);
+                if (tx->read_set[table_key].data != itr->second.data) {
+                    assert (tx->read_set[table_key].metadata < itr->second.metadata);
                 }
-                results_table[itr->first] = tx->read_set[itr->first].data; //should be the same, if not, then we will abort anyway.
+                results_table[itr->first] = tx->read_set[table_key].data; //should be the same, if not, then we will abort anyway.
             }
             if (results_table.size() >= num_item_limit) {
                 break;
