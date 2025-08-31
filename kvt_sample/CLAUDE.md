@@ -1,13 +1,3 @@
-kvt_inc.h is an interface for a key-value transactional database. Now we want to implement a in-memory version of the database. 
-
-The database use a std::map to store data. We use a hash map to track table_name to table mapping. A table is just a std::map<string, Value>. The Value is a string value and some metadata. The metadata could be a lock flag (just a boolean value, as for pessimistic concurrency control 2 phase locking, 2PL) or a version number (as for opportunistic concurrency control, OCC). All the tables are protected by a mutex and can only be accessed from a single thread. 
-
-We also have a set of transactions and they are tracked by a map from TxID -> Transaction. Each transaction context tracks read and written key values. When reading from KV, the key Value being read and the key and Value being written are kept in the transaction context (and the locks are aquired or versions are tracked, depending on 2PL or OCC). Inside the transaction context, both table and key form the actual key (to track which table have the key). The simplest way is to use a concatinated key with a speration symbole between table name and key (e.g. 0x00). If a read from client is for a key that has already been accessed in the transaction (i.e. being get/put before), then the value in the transaction context should be returned (instead of reading from Table KV Map). 
-
-At the transaction commit time, for 2PL the locks are being released, and new values are installed in the Tables. For the OCC case, the versions are checked to see if all data read are still the same version. If not, we need to fail the commit. In the abort/rollback case, we just abandon the locally modified values, and release locks properly. 
-
-The entire code of in-memory transactional database is implemented in two files: kvt_mem.h and kvt_mem.cpp. 
-
 We write a comprehensive test for kvt_mem, including the KVTManagerWrapperSimple and KVTManagerWrapperOCC (i.e. assume we can exchange the class, since the interface are the same). The idea is to randomly start transactions that involve a set of keys and values. We have a few consistency gurantee for the keys and values for the database. 
 
 We assume keys are in a given range, e.g. from string 0 to 10000 (turn them into string), and values are also from 0 to 1000 (also make them string). The transactions can be mixed: single shot, aborted, committed, and so on. A transaction can include upto 10 operations, but we have some constraints. The idea is, we can we make sure that for all transactions, the modified values' in a hundred range sum can be evenly divided by 100. i.e. the invarant is, For all keys in 0 to 100, the sum of the values must be evenly dividable by 100 (say, can be 9900 but not 9911). Same for keys from 100 to 200, and so on, up to 9900 to 10000. 
@@ -17,3 +7,17 @@ During operation, we run many transactions, each involve up to 20 operations. We
 The transactions must obey certain constraints. In a transaction, if we delete a key (say 112) with value 50, we need to modify two keys within the same 100 range, say 123 and 155, so that the two keys can have value 23 and 127, so that the total (127 + 23 - 50) is 100. We can either add those keys if they do not exist, or we can change their value by the desired amount. Similarly, if we add a new key with value 700, we can also add one with 200 in the same 100 range (say, first is key 2322 and the other is 2345), but can not modify key 2366 and add its value by 23. By doing such transactions, the modified value total within each 100 range is evenly divided by 100. We can make some wrong transactions, e.g. the modified values are not evenly dividable, say, total 123 in the 300 to 400 key range, but then we have to abort the transaction. All transactions that violate the consistency is aborted and transactions obeying the constraints can be either committed or aborted. We mix commit and abort/rollback with a fixed ratio. A transaction may contain mutliple 100 ranges, as long as each 100 range obey the constraint. 
 
 At the start, we first populate the database (by, say add 2000 keys out of the 10000), but make sure that the added key values obey the constraint. As stress test goes on, we do consistency check once in a while (say, every 100 transactions) by do a range scan of a range that should obey constraint (say, from 200 to 400). Report error when we detect one. The range scan do not need to wait for every transaction to commit, as our transactional system suppose to gurantee isolation. 
+
+In each transaction execution, we need to focus on a small set of consistent ranges (say from 1 to 4), and track operations in each range, because generate random values to try to fit satisfy constraint is impossible. The steps should be:
+0) predetermine whether we want to abort or not. 
+1) decide a few (1 ~ 4) ranges, and track range modification sum. 
+2) decide number of ops in each range. 
+3) Now randomly choose a range, then randomly choose a key, then randomly choose an operation. If this is not the last operation for the range, just choose a random value to change upon the key, 
+4) If we predetermine to commit the transaction, and it is the last operation for this range, then calculate what value should we use to add/delete from the key so that the constraint can be met. 
+5) if not done, continue back to 3)
+6) commit or abort as you see fit. 
+
+Values in the store (i.e when use kvt_get kvt_set) and so on are already being tracked correctly, so when you set a key with a value, next time you get from the key you will get the new value even before you commit. Keep this in mind, as delete will make you not able to read the old value (though the store keeps isolation so other transactions will not see the new values before your commit).
+
+For interleaved test, we essentially run multiple single transactions at the same time, keeping each one's context (the context is as described above). Every time, choose a transaction to run one operation, update the transaction's context and continue. After commit/abort, we remove the transaction context, and randomly chose to start a transaction or not. You need to take care to avoid constant number of on-going transactions or transactions always start immediate after another one aborts or commits. 
+

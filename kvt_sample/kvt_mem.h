@@ -1,9 +1,5 @@
 #ifndef KVT_MEM_H
 #define KVT_MEM_H
-
-#include <brpc/redis.h>
-#include <sys/types.h>
-#include <csetjmp>
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
@@ -12,6 +8,8 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <cassert>
+#include <iostream>
 //#include <algorithm>
 
 // Forward declarations
@@ -405,17 +403,22 @@ class KVTManagerWrapperSimple : public KVTManagerWrapperInterface
 
 class KVTManagerWrapperBase : public KVTManagerWrapperInterface
 {
-    protected;
+    protected:
         struct Entry {
             std::string data;
             int32_t metadata; //for 2PL, it is the lock flag, for OCC, it is the version number. -1 means deleted. 
+            
+            Entry() : data(""), metadata(0) {}
+            Entry(const std::string& d, int32_t m) : data(d), metadata(m) {}
         };
 
-        sturct Table {
+        struct Table {
             uint64_t id;
             std::string name;
             std::string partition_method;  // "hash" or "range"
-            std::map<std::string, Entry> entries;
+            std::map<std::string, Entry> data;
+            
+            Table(const std::string& n, const std::string& pm, uint64_t i) : name(n), partition_method(pm), id(i) {}
         };
 
         struct Transaction {
@@ -423,6 +426,8 @@ class KVTManagerWrapperBase : public KVTManagerWrapperInterface
             std::map<std::string, Entry> read_set;    // table_key -> Value (for reads)
             std::map<std::string, Entry> write_set;   // table_key -> Value (for writes)
             std::unordered_set<std::string> delete_set; // table_key -> deleted
+            
+            Transaction(uint64_t id) : tx_id(id) {}
         };
 
         std::unordered_map<std::string, std::unique_ptr<Table>> tables;
@@ -728,7 +733,7 @@ class KVTManagerWrapperOCC: public KVTManagerWrapperBase
 
 public:
   // Transaction management
-  override bool commit_transaction(uint64_t tx_id, std::string& error_msg)
+  bool commit_transaction(uint64_t tx_id, std::string& error_msg) override
     {
         std::lock_guard<std::mutex> lock(global_mutex);
         Transaction* tx = get_transaction(tx_id);
@@ -745,9 +750,9 @@ public:
             uint64_t local_version = read_pair.second.metadata;
 
             if (table->data.find(key) == table->data.end() || //being deleted by another transaction
-                table->data[key].version > local_version) {  //being written by another transaction
+                table->data[key].metadata > local_version) {  //being written by another transaction
                 error_msg = "Transaction " + std::to_string(tx_id) + " has stale data";
-                transactions.erase(tx_id); //baskc
+                transactions.erase(tx_id);
                 return false;
             }
         }
@@ -764,14 +769,14 @@ public:
             auto [table_name, key] = parse_table_key(write_pair.first);
             Table* table = get_table(table_name);
             assert(table);
-            uint64_t new_version = (table->data.find(key) != table->data.end()) ? table->data[key].version + 1 : 1;
-            table->data[key] = Value(write_pair.second.data, new_version);
+            uint64_t new_version = (table->data.find(key) != table->data.end()) ? table->data[key].metadata + 1 : 1;
+            table->data[key] = Entry(write_pair.second.data, static_cast<int32_t>(new_version));
         }
         transactions.erase(tx_id);
         return true;
     }
             
-  override bool rollback_transaction(uint64_t tx_id, std::string& error_msg)
+  bool rollback_transaction(uint64_t tx_id, std::string& error_msg) override
     {
         std::lock_guard<std::mutex> lock(global_mutex);
         Transaction* tx = get_transaction(tx_id);
@@ -782,8 +787,8 @@ public:
         transactions.erase(tx_id);
         return true;
     }
-  override bool get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
-           std::string& value, std::string& error_msg)
+  bool get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+           std::string& value, std::string& error_msg) override
     {
         std::lock_guard<std::mutex> lock(global_mutex);
         //one shot transaction is only allowed for read only transaction.
@@ -833,8 +838,8 @@ public:
         return true;
     }
 
-  override bool set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
-           const std::string& value, std::string& error_msg)
+  bool set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+           const std::string& value, std::string& error_msg) override
     {
         std::lock_guard<std::mutex> lock(global_mutex);
         if (tx_id == 0) {
@@ -847,14 +852,14 @@ public:
             return false;
         }
         std::string table_key = make_table_key(table_name, key);
-        tx->write_set[table_key] = Value(value, 0); //no need to track metadata for write set
+        tx->write_set[table_key] = Entry(value, 0); //no need to track metadata for write set
         auto itr = tx->delete_set.find(table_key);
         if (itr != tx->delete_set.end()) {
             tx->delete_set.erase(itr); //this is opitonal, as we install deletes first then writes
         }
         return true;
     }
-    override bool del(uint64_t tx_id, const std::string& table_name, const std::string& key, std::string& error_msg)
+    bool del(uint64_t tx_id, const std::string& table_name, const std::string& key, std::string& error_msg) override
     {
         std::lock_guard<std::mutex> lock(global_mutex);
         if (tx_id == 0) {
@@ -890,9 +895,9 @@ public:
     }
 
 
-  override bool scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
+  bool scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
             const std::string& key_end, size_t num_item_limit, 
-            std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg);
+            std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) override
     {
         std::lock_guard<std::mutex> lock(global_mutex);
         Table* table = get_table(table_name);
@@ -936,12 +941,12 @@ public:
                 continue;
             if (tx->read_set.find(itr->first) == tx->read_set.end()) { //not in the read set, so need to read from table.
                 tx->read_set[itr->first] = itr->second;
-                results[itr->first] = itr->second.data;
+                results_table[itr->first] = itr->second.data;
             } else {
                 if (tx->read_set[itr->first].data != itr->second.data) {
                     assert (tx->read_set[itr->first].metadata < itr->second.metadata);
                 }
-                results[itr->first] = tx->read_set[itr->first].data; //should be the same, if not, then we will abort anyway.
+                results_table[itr->first] = tx->read_set[itr->first].data; //should be the same, if not, then we will abort anyway.
             }
             if (results_table.size() >= num_item_limit) {
                 break;
