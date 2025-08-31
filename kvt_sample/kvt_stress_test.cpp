@@ -7,7 +7,9 @@
 #include <atomic>
 #include <sstream>
 #include <algorithm>
+#include <unordered_map>
 #include <set>
+#include <cstdlib>
 #include <iomanip>
 
 // Configuration constants
@@ -16,10 +18,13 @@ const int MAX_VALUE = 1000;
 const int RANGE_SIZE = 100;
 const int MAX_RANGES = MAX_KEY / RANGE_SIZE;
 const int MAX_OPS_PER_TX = 20;
-const int INITIAL_KEYS = 2000;
+const int MIN_OPS_PER_TX = 1;
+const int MAX_RANGES_PER_TX = 4;
+const int INITIAL_KEYS = 2000;  // Back to normal
 const int CONSISTENCY_CHECK_INTERVAL = 100;
 const int MAX_CONCURRENT_TXS = 10;
 const double COMMIT_RATIO = 0.7; // 70% commit, 30% abort
+const int CONSTRAINT_DIVISOR = 100; 
 
 // Test modes
 enum TestMode {
@@ -28,17 +33,28 @@ enum TestMode {
     MULTI_THREADED
 };
 
+#define PANIC(x) {x; exit(1);}
+
 // Transaction context for tracking operations
 struct TransactionContext {
+    struct Operation {
+        enum {
+            OP_GET,
+            OP_SET,
+            OP_DEL,
+            OP_SCAN
+        }; 
+        int op_type;
+        int key;
+        int key2; 
+        int value;
+        int value2;
+    };
     uint64_t tx_id;
     bool should_commit;
-    // Removed range_modifications - we now check constraints by scanning
-    std::map<int, int> ops_remaining;       // range_id -> ops left
-    std::vector<std::pair<std::string, std::string>> operations; // for replay/debug
-    std::set<int> ranges_involved;
-    int total_ops_remaining;
-    
-    TransactionContext() : tx_id(0), should_commit(true), total_ops_remaining(0) {}
+    int num_ops;
+    std::vector<int> ranges; 
+    std::vector<Operation> operations; // for replay/debug
 };
 
 class KVTStressTest {
@@ -88,395 +104,221 @@ public:
         // Create table
         std::string error_msg;
         table_id = kvt_manager->create_table(table_name, "range", error_msg);
-        if (table_id == 0) {
-            std::cerr << "Failed to create table: " << error_msg << std::endl;
-            return false;
-        }
-        std::cout << "Created table '" << table_name << "' with ID: " << table_id << std::endl;
-        
+        if (table_id == 0)
+            PANIC(std::cerr << "Failed to create table: " << error_msg << std::endl;);
         // Populate initial data
-        if (!populate_initial_data()) {
-            std::cerr << "Failed to populate initial data" << std::endl;
-            return false;
-        }
-        
-        // Verify initial consistency
-        if (!check_consistency("initial")) {
-            std::cerr << "Initial consistency check failed" << std::endl;
-            return false;
-        }
-        
+        populate_initial_data(); 
+        check_consistency("initial"); 
         std::cout << "Initialization complete!" << std::endl;
         return true;
     }
     
-    bool populate_initial_data() {
-        std::cout << "Populating initial data with " << INITIAL_KEYS << " keys..." << std::endl;
-        
-        std::uniform_int_distribution<> value_dist(0, MAX_VALUE);
-        
-        // Generate keys per range to ensure constraint satisfaction
-        std::map<int, std::vector<std::pair<int, int>>> range_keys; // range -> [(key, value)]
-        std::set<int> used_keys;
-        
-        // Distribute keys across ranges first
-        int keys_per_range = INITIAL_KEYS / MAX_RANGES;
-        int extra_keys = INITIAL_KEYS % MAX_RANGES;
-        
-        for (int range_id = 0; range_id < MAX_RANGES; range_id++) {
-            int keys_for_this_range = keys_per_range + (extra_keys > 0 ? 1 : 0);
-            if (extra_keys > 0) extra_keys--;
-            
-            if (keys_for_this_range == 0) continue;
-            
-            // Generate keys for this range
-            int range_start = range_id * RANGE_SIZE;
-            int range_end = range_start + RANGE_SIZE - 1;
-            
-            for (int i = 0; i < keys_for_this_range; i++) {
-                int key;
-                do {
-                    key = std::uniform_int_distribution<>(range_start, range_end)(rng);
-                } while (used_keys.find(key) != used_keys.end());
-                
-                used_keys.insert(key);
-                int value = value_dist(rng);
-                range_keys[range_id].push_back({key, value});
-            }
-            
-            // Ensure constraint satisfaction for this range
-            if (!range_keys[range_id].empty()) {
-                // Calculate sum of all values except the first one
-                int sum_without_first = 0;
-                for (size_t i = 1; i < range_keys[range_id].size(); i++) {
-                    sum_without_first += range_keys[range_id][i].second;
-                }
-                
-                // Set the first key's value to make total sum divisible by 100
-                int remainder = sum_without_first % 100;
-                int needed_value = (100 - remainder) % 100;
-                
-                // Ensure the needed value is within bounds
-                if (needed_value > MAX_VALUE) {
-                    needed_value = needed_value % (MAX_VALUE + 1);
-                }
-                
-                range_keys[range_id][0].second = needed_value;
-                
-                // Verify the constraint is satisfied
-                int total_sum = sum_without_first + needed_value;
-                
-                // Debug output disabled for cleaner test
-                // std::cout << "DEBUG: Range " << range_id << " initialization..."
-                
-                if (total_sum % 100 != 0) {
-                    std::cerr << "ERROR in range " << range_id << ": sum=" << total_sum 
-                             << ", sum_without_first=" << sum_without_first 
-                             << ", needed_value=" << needed_value << std::endl;
-                }
-                assert(total_sum % 100 == 0);
-            }
-        }
-        
-        // Insert all keys in a single transaction
+    void populate_initial_data() {
         std::string error_msg;
-        uint64_t tx_id = kvt_manager->start_transaction(error_msg);
-        if (tx_id == 0) {
-            std::cerr << "Failed to start initialization transaction: " << error_msg << std::endl;
-            return false;
-        }
-        
-        int total_inserted = 0;
-        for (const auto& [range_id, keys] : range_keys) {
-            for (const auto& [key, value] : keys) {
-                if (!kvt_manager->set(tx_id, table_name, key_to_string(key), 
-                                     value_to_string(value), error_msg)) {
-                    std::cerr << "Failed to set key " << key << ": " << error_msg << std::endl;
-                    kvt_manager->rollback_transaction(tx_id, error_msg);
-                    return false;
+        int keys_each_range = INITIAL_KEYS / MAX_RANGES;
+        for (int range_id = 0; range_id < MAX_RANGES; range_id++) {
+            int range_start = range_id * RANGE_SIZE;
+            int range_sum = 0; 
+            std::unordered_map<int, int> key_values; 
+            for (int i = 0; i < keys_each_range; i++) {
+                int key = rand() % RANGE_SIZE; 
+                int value = rand() % MAX_VALUE; 
+                if (key_values.find(key) != key_values.end()) {
+                    i--; 
+                    continue; 
                 }
-                total_inserted++;
+                key_values[key] = value;
+                range_sum += value;
+            }
+            int diff = CONSTRAINT_DIVISOR - range_sum % CONSTRAINT_DIVISOR; 
+            key_values.begin().second += diff;
+            for (auto [key, value] : key_values) {
+                kvt_manager->set(0, table_name, key_to_string(key), value_to_string(value), error_msg);
             }
         }
-        
-        if (!kvt_manager->commit_transaction(tx_id, error_msg)) {
-            std::cerr << "Failed to commit initialization transaction: " << error_msg << std::endl;
-            return false;
-        }
-        
-        std::cout << "Successfully populated " << total_inserted << " keys across " 
-                  << range_keys.size() << " ranges" << std::endl;
-        return true;
     }
     
-    bool check_consistency(const std::string& phase = "") {
-        std::string prefix = phase.empty() ? "" : "[" + phase + "] ";
-        std::cout << prefix << "Checking consistency..." << std::endl;
-        
+    bool check_consistency() {
         std::string error_msg;
-        uint64_t tx_id = kvt_manager->start_transaction(error_msg);
-        if (tx_id == 0) {
-            std::cerr << "Failed to start consistency check transaction: " << error_msg << std::endl;
-            return false;
-        }
-        
-        // Scan all ranges and verify constraint
+        uint64_t tx_id = 0;
+        // Scan entire key range
+        std::vector<std::pair<std::string, std::string>> all_results;
+        if (!kvt_manager->scan(tx_id, table_name, key_to_string(0), 
+                               key_to_string(MAX_KEY), MAX_KEY, all_results, error_msg))
+            PANIC(std::cerr << "Failed to scan database: " << error_msg << std::endl;);
+        // Check constraints - results are sorted
         bool all_consistent = true;
-        int total_checked = 0;
-        for (int range_id = 0; range_id < MAX_RANGES; range_id++) {
-            int range_start = range_id * RANGE_SIZE;
-            int range_end = range_start + RANGE_SIZE - 1;
-            
-            std::vector<std::pair<std::string, std::string>> results;
-            if (!kvt_manager->scan(tx_id, table_name, key_to_string(range_start),
-                                  key_to_string(range_end), RANGE_SIZE, results, error_msg)) {
-                // Empty range is ok
-                continue;
+        int current_range = -1;
+        int current_range_sum = 0;
+        for (const auto& [key_str, value_str] : all_results) {
+            int key = string_to_key(key_str);
+            int value = string_to_value(value_str);
+            int range_id = get_range_id(key);
+            // If we moved to a new range, check the previous range's sum
+            if (range_id != current_range) {
+                if (current_range != -1 && current_range_sum > 0 && current_range_sum % 100 != 0)
+                    PANIC(std::cerr << "Consistency violation in range " << current_range
+                                 << ": sum=" << current_range_sum << " (not divisible by 100)" << std::endl;);
+                // Start new range
+                current_range = range_id;
+                current_range_sum = 0;
             }
-            
-            if (results.empty()) continue;
-            
-            int sum = 0;
-            for (const auto& [key_str, value_str] : results) {
-                int key = string_to_key(key_str);
-                int value = string_to_value(value_str);
-                
-                // Verify key is in correct range
-                if (get_range_id(key) != range_id) {
-                    std::cerr << "Key " << key << " found in wrong range " << range_id << std::endl;
-                    all_consistent = false;
-                }
-                
-                sum += value;
-            }
-            
-            if (sum % 100 != 0) {
-                std::cerr << "Consistency violation in range " << range_id 
-                         << " (" << range_start << "-" << range_end << ")"
-                         << ": sum=" << sum << " (not divisible by 100), keys=" << results.size() << std::endl;
-                
-                // Debug: print first few keys and values
-                if (results.size() <= 25) {
-                    for (const auto& [key_str, value_str] : results) {
-                        std::cerr << "  Key: " << key_str << ", Value: " << value_str 
-                                 << " (expected range: " << get_range_id(string_to_key(key_str)) << ")" << std::endl;
-                    }
-                }
-                
-                all_consistent = false;
-            } else {
-                // Debug output disabled
-            }
-            total_checked++;
+            current_range_sum += value;
         }
-        
-        kvt_manager->rollback_transaction(tx_id, error_msg);
-        
-        if (all_consistent) {
-            std::cout << prefix << "Consistency check PASSED (checked " << total_checked << " ranges)" << std::endl;
-        } else {
-            std::cerr << prefix << "Consistency check FAILED" << std::endl;
-        }
-        
+        // Check the last range
+        if (current_range != -1 && current_range_sum > 0 && current_range_sum % 100 != 0) 
+            PANIC(std::cerr << "Consistency violation in range " << current_range
+                         << ": sum=" << current_range_sum << " (not divisible by 100)" << std::endl;);
         return all_consistent;
     }
     
     TransactionContext create_transaction_context() {
         TransactionContext ctx;
-        
-        // Decide commit/abort
+        std::string error_msg;
+        ctx.tx_id = kvt_manager->start_transaction(error_msg);
+        if (ctx.tx_id == 0) 
+            PANIC(std::cerr << "Failed to start transaction: " << error_msg << std::endl;);
         std::uniform_real_distribution<> commit_dist(0.0, 1.0);
         ctx.should_commit = commit_dist(rng) < COMMIT_RATIO;
-        
-        // Choose 1-4 ranges
-        std::uniform_int_distribution<> num_ranges_dist(1, 4);
-        int num_ranges = num_ranges_dist(rng);
-        
+        ctx.num_ops = rand() % MAX_OPS_PER_TX + 1;
+        int num_ranges = rand() % MAX_RANGES_PER_TX + 1;
         // Select random ranges
-        std::uniform_int_distribution<> range_dist(0, MAX_RANGES - 1);
-        while (ctx.ranges_involved.size() < num_ranges) {
-            ctx.ranges_involved.insert(range_dist(rng));
+        for (int i = 0; i < num_ranges; i++) {
+            int range_id = rand() % MAX_RANGES + 1; //can repeat
+            ctx.ranges.push_back(range_id);
         }
-        
-        // Decide operations per range
-        std::uniform_int_distribution<> ops_dist(1, 5);
-        ctx.total_ops_remaining = 0;
-        for (int range_id : ctx.ranges_involved) {
-            int ops = ops_dist(rng);
-            ctx.ops_remaining[range_id] = ops;
-            // Range added to involved set
-            ctx.total_ops_remaining += ops;
-        }
-        
-        // Limit total operations
-        if (ctx.total_ops_remaining > MAX_OPS_PER_TX) {
-            ctx.total_ops_remaining = MAX_OPS_PER_TX;
-            // Redistribute operations
-            int ops_per_range = MAX_OPS_PER_TX / ctx.ranges_involved.size();
-            int extra = MAX_OPS_PER_TX % ctx.ranges_involved.size();
-            auto it = ctx.ranges_involved.begin();
-            for (int range_id : ctx.ranges_involved) {
-                ctx.ops_remaining[range_id] = ops_per_range + (extra-- > 0 ? 1 : 0);
-            }
-        }
-        
         return ctx;
     }
-    
-    bool execute_single_operation(TransactionContext& ctx) {
-        if (ctx.total_ops_remaining <= 0) return false;
-        
-        // Choose a range that still has operations
-        std::vector<int> available_ranges;
-        for (const auto& [range_id, ops] : ctx.ops_remaining) {
-            if (ops > 0) available_ranges.push_back(range_id);
-        }
-        
-        if (available_ranges.empty()) return false;
-        
-        std::uniform_int_distribution<> range_choice(0, available_ranges.size() - 1);
-        int range_id = available_ranges[range_choice(rng)];
-        
-        int range_start = range_id * RANGE_SIZE;
-        int range_end = range_start + RANGE_SIZE - 1;
-        
+
+    //return false if no more operations to execute
+    void execute_single_operation(TransactionContext& ctx) {
+        int rindex = rand() % ctx.ranges.size();
+        int range_id = ctx.ranges[rindex];
+        //randomly choose a op to execute according to the probability
         std::string error_msg;
-        bool is_last_op_for_range = (ctx.ops_remaining[range_id] == 1);
-        
-        // Choose random keys in this range
-        std::uniform_int_distribution<> key_dist(range_start, range_end);
-        int key = key_dist(rng);
-        
-        // Choose operation type
-        std::uniform_int_distribution<> op_dist(0, 2); // 0=get, 1=set, 2=del
-        int op_type = op_dist(rng);
-        
-        if (op_type == 0) { // GET operation
-            std::string value;
-            bool found = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
-            
-            // Debug: GET operation
-                     
-        } else if (op_type == 1) { // SET operation
-            // ALWAYS read the current value first
-            std::string old_value_str;
-            int old_value = 0;
-            bool key_exists = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), old_value_str, error_msg);
-            if (key_exists) {
-                old_value = string_to_value(old_value_str);
-            }
-            
-            // Choose new value - always random since we check constraint before commit
-            std::uniform_int_distribution<> val_dist(0, MAX_VALUE);
-            int new_value = val_dist(rng);
-            
-            // Perform the set
-            if (!kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg)) {
-                std::cerr << "SET failed: " << error_msg << std::endl;
-                return false;
-            }
-            
-            // Operation complete
-            
-        } else { // DEL operation
-            // ALWAYS read the value before deleting
-            std::string old_value_str;
-            bool key_exists = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), old_value_str, error_msg);
-            
-            if (key_exists) {
-                int old_value = string_to_value(old_value_str);
-                
-                // Perform the delete
-                if (!kvt_manager->del(ctx.tx_id, table_name, key_to_string(key), error_msg)) {
-                    std::cerr << "DEL failed: " << error_msg << std::endl;
-                    return false;
-                }
-                
-                // Deletion complete
+        //first choose a range from ctx.ranges
+        std::uniform_real_distribution<> prob_dist(0.0, 1.0);
+        std::string value;
+        if (prob_dist(rng) < 0.4) { //get
+            //choose a key from the range
+            int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
+            if (!kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg))
+                PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;);
+            int value_int = string_to_value(value);
+            //append to the operations
+            ctx.operations.push_back({TransactionContext::Operation::OP_GET, key, 0,  value_int, 0});
+        } else if (prob_dist(rng) < 0.8) { //set
+            //scan the ops to see whether we have already got a key's value. 
+            int key = -1;
+            if (ctx.operations.size() > 0 && ctx.operations.back().op_type == TransactionContext::Operation::OP_GET) {
+                key = ctx.operations.back().key; //if previous op is a get, we can use the key
             } else {
-                // Debug: DEL key not found
+                //otherwise, choose a new key, and get its value
+                int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
+                if (!kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg))
+                    PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;);
+                int value_int = string_to_value(value);
+                //append to the operations
+                ctx.operations.push_back({TransactionContext::Operation::OP_GET, key, 0,  value_int, 0});
             }
+            //choose a new value
+            int new_value = rand() % MAX_VALUE;
+            if (!kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg))
+                PANIC(std::cerr << "Failed to set key: " << error_msg << std::endl;);
+            ctx.operations.push_back({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
+        } else if (prob_dist(rng) < 0.9) { //del
+            int key = -1; 
+            if (ctx.operations.size() > 0 && ctx.operations.back().op_type == TransactionContext::Operation::OP_GET) {
+                key = ctx.operations.back().key; //if previous op is a get, we can use the key
+            } else {
+                //otherwise, choose a new key, and get its value
+                int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
+                if (!kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg))
+                    PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;);
+                int value_int = string_to_value(value);
+                //append to the operations
+                ctx.operations.push_back({TransactionContext::Operation::OP_GET, key, 0,  value_int, 0});
+            }
+            if (!kvt_manager->del(ctx.tx_id, table_name, key_to_string(key), error_msg))
+                PANIC(std::cerr << "Failed to delete key: " << error_msg << std::endl;);
+            ctx.operations.push_back({TransactionContext::Operation::OP_DEL, key, 0, 0, 0});
+        } else { //scan does not need to care about range
+            int start_key = rand() % MAX_KEY;
+            int end_key = rand() % MAX_KEY;
+            if (start_key > end_key) {
+                int tmp = start_key;
+                start_key = end_key;
+                end_key = tmp;
+            }
+            std::vector<std::pair<std::string, std::string>> results;
+            if (!kvt_manager->scan(ctx.tx_id, table_name, key_to_string(start_key), key_to_string(end_key), RANGE_SIZE, results, error_msg))
+                PANIC(std::cerr << "Failed to scan key: " << error_msg << std::endl;);
+            //append to the operations
+            ctx.operations.push_back({TransactionContext::Operation::OP_SCAN, start_key, end_key, 0, results.size()});
         }
-        
-        ctx.ops_remaining[range_id]--;
         ctx.total_ops_remaining--;
-        return true;
     }
     
-    bool run_single_transaction(TransactionContext& ctx) {
+    bool run_single_transaction_normal(TransactionContext& ctx) {
         std::string error_msg;
-        
-        // Start transaction
-        ctx.tx_id = kvt_manager->start_transaction(error_msg);
-        if (ctx.tx_id == 0) {
-            std::cerr << "Failed to start transaction: " << error_msg << std::endl;
-            return false;
+        //total number of operations to execute will be larger than the predefined number
+        //first execute the predefined number of operations, some may create more than 1 op.
+        for (int i = 0; i < ctx.num_ops; i++) {
+            execute_single_operation(ctx);
         }
-        
-        // Execute all operations
-        while (ctx.total_ops_remaining > 0) {
-            if (!execute_single_operation(ctx)) {
-                break;
-            }
-        }
-        
-        // Commit or abort
-        bool success;
         if (ctx.should_commit) {
-            // Verify constraint before commit by scanning affected ranges
-            bool constraint_satisfied = true;
-            std::string scan_error;
-            
-            // Check each affected range by scanning it
-            for (int range_id : ctx.ranges_involved) {
-                std::string start_key = key_to_string(range_id * 100);
-                std::string end_key = key_to_string((range_id + 1) * 100);
-                
-                std::vector<std::pair<std::string, std::string>> range_data;
-                if (!kvt_manager->scan(ctx.tx_id, table_name, start_key, end_key, 100, range_data, scan_error)) {
-                    std::cerr << "Failed to scan range " << range_id << ": " << scan_error << std::endl;
-                    constraint_satisfied = false;
-                    break;
-                }
-                
-                // Calculate the sum for this range
-                int range_sum = 0;
-                for (const auto& [key, value] : range_data) {
-                    range_sum += string_to_value(value);
-                }
-                
-                // Check if sum is divisible by 100
-                if (range_sum % 100 != 0) {
-                    constraint_satisfied = false;
-                    break;
+            //now fix up the operations to make the constraint satisfied
+            std::map<int, int> range_delta_sum;
+            for (int range_id : ctx.ranges) {
+                range_delta_sum[range_id] = 0;
+            }
+            //scan the ops to get the range_delta_sum, a mutation op(set, del) will always have a get before it. 
+            for (int i = 0; i < ctx.operations.size(); i++) {
+                if (ctx.operations[i].op_type == TransactionContext::Operation::OP_SET) {
+                    assert (i > 0 && ctx.operations[i-1].op_type == TransactionContext::Operation::OP_GET);
+                    int prev_value = ctx.operations[i-1].value;
+                    int new_value = ctx.operations[i].value;
+                    assert(range_delta_sum.find(ctx.operations[i].key / RANGE_SIZE) != range_delta_sum.end());
+                    range_delta_sum[ctx.operations[i].key / RANGE_SIZE] += new_value - prev_value;
+                } else if (ctx.operations[i].op_type == TransactionContext::Operation::OP_DEL) {
+                    assert (i > 0 && ctx.operations[i-1].op_type == TransactionContext::Operation::OP_GET);
+                    int prev_value = ctx.operations[i-1].value;
+                    assert(range_delta_sum.find(ctx.operations[i].key / RANGE_SIZE) != range_delta_sum.end());
+                    range_delta_sum[ctx.operations[i].key / RANGE_SIZE] -= prev_value;
                 }
             }
-            
-            if (constraint_satisfied) {
-                // Committing with satisfied constraint
-                success = kvt_manager->commit_transaction(ctx.tx_id, error_msg);
-                if (success) {
-                    commit_count++;
-                } else {
-                    std::cerr << "TX" << ctx.tx_id << " Commit failed: " << error_msg << std::endl;
-                    abort_count++;
+            //now fix up the operations to make the constraint satisfied
+            for (auto [range_id, delta_sum] : range_delta_sum) {
+                int diff = CONSTRAINT_DIVISOR - delta_sum % CONSTRAINT_DIVISOR;
+                if (diff != CONSTRAINT_DIVISOR) { //we need to get a new value to add to the range
+                    //we get a key's value
+                    int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
+                    if (!kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg))
+                        PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;);
+                    int value_int = string_to_value(value);
+                    //append to the operations
+                    ctx.operations.push_back({TransactionContext::Operation::OP_GET, key, 0,  value_int, 0});
+                    kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(value_int + diff), error_msg);
+                    ctx.operations.push_back({TransactionContext::Operation::OP_SET, key, 0,  value_int + diff, 0});
                 }
+            }
+            //commit
+            bool success = kvt_manager->commit_transaction(ctx.tx_id, error_msg);
+            if (success) {
+                commit_count++;
             } else {
-                // Forced abort due to constraint violation
-                // Aborting due to constraint violation
-                success = kvt_manager->rollback_transaction(ctx.tx_id, error_msg);
+                std::cerr << "TX" << ctx.tx_id << " Commit failed: " << error_msg << std::endl;
                 abort_count++;
             }
+            return success;
         } else {
-            // Aborting as predetermined
-            success = kvt_manager->rollback_transaction(ctx.tx_id, error_msg);
+            //abort
+            bool success = kvt_manager->rollback_transaction(ctx.tx_id, error_msg);
             abort_count++;
+            return success;
         }
-        
-        transaction_count++;
-        return success;
     }
-    
+
     void run_single_non_interleaved_test(int num_transactions) {
         std::cout << "\n=== Running Single-Threaded Non-Interleaved Test ===" << std::endl;
         std::cout << "Executing " << num_transactions << " transactions sequentially..." << std::endl;
@@ -739,12 +581,19 @@ int main(int argc, char* argv[]) {
         test_implementation(&simple_wrapper, "KVTManagerWrapperSimple");
     }
     
-    // Test KVTManagerWrapperOCC - temporarily disabled for debugging
-    /*{
+    // Test KVTManagerWrapperOCC
+    {
         std::cout << "\nTesting KVTManagerWrapperOCC..." << std::endl;
         KVTManagerWrapperOCC occ_wrapper;
         test_implementation(&occ_wrapper, "KVTManagerWrapperOCC");
-    }*/
+    }
+    
+    // Test KVTManagerWrapper2PL
+    {
+        std::cout << "\nTesting KVTManagerWrapper2PL..." << std::endl;
+        KVTManagerWrapper2PL twopl_wrapper;
+        test_implementation(&twopl_wrapper, "KVTManagerWrapper2PL");
+    }
     
     std::cout << "\n\n=== ALL IMPLEMENTATIONS TESTED ===" << std::endl;
     return 0;

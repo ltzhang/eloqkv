@@ -3,7 +3,8 @@
 #include <vector>
 
 int main() {
-    KVTManagerWrapperSimple kvt;
+    // Test with OCC instead
+    KVTManagerWrapperOCC kvt;
     
     std::string error_msg;
     

@@ -12,7 +12,6 @@
 #include <iostream>
 #include <algorithm>
 
-// Forward declarations
 class Table;
 class Transaction;
 class Value;
@@ -38,8 +37,6 @@ class KVTManagerWrapperInterface
                   const std::string& key_end, size_t num_item_limit, 
                   std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) = 0;
 };
-//No concurrency control, so transactions just commit immediately and can not be rolled back
-//No isolation, read uncommitted.
 class KVTManagerWrapperNoCC : public KVTManagerWrapperInterface
 {
     private:
@@ -185,7 +182,6 @@ class KVTManagerWrapperNoCC : public KVTManagerWrapperInterface
         }
 };
 
-//only allow a single transaction at a time, truely serializable. can be rolled back.
 class KVTManagerWrapperSimple : public KVTManagerWrapperInterface
 {
     private:
@@ -533,222 +529,542 @@ class KVTManagerWrapperBase : public KVTManagerWrapperInterface
             return tx_id;
         }
         
+        // DEBUG: Intrusive consistency check - directly accesses internal data
+        bool debug_check_consistency(const std::string& table_name, const std::string& context) {
+            std::lock_guard<std::mutex> lock(global_mutex);
+            std::cout << "\n=== DEBUG CONSISTENCY CHECK [" << context << "] ===" << std::endl;
+            
+            Table* table = get_table(table_name);
+            if (!table) {
+                std::cout << "Table not found: " << table_name << std::endl;
+                return false;
+            }
+            
+            // Group keys by range (0-99, 100-199, etc.)
+            std::map<int, std::vector<std::pair<int, int>>> ranges;  // range_start -> [(key, value)]
+            
+            for (const auto& [key_str, entry] : table->data) {
+                if (entry.metadata == -1) continue;  // Skip deleted entries
+                
+                try {
+                    int key = std::stoi(key_str);
+                    int value = std::stoi(entry.data);
+                    int range_start = (key / 100) * 100;
+                    ranges[range_start].emplace_back(key, value);
+                    
+                    // Debug: show first few entries
+                    static int debug_count = 0;
+                    if (debug_count++ < 10) {
+                        std::cout << "  Key " << key << " -> Value " << value 
+                                  << " (metadata=" << entry.metadata << ")" << std::endl;
+                    }
+                } catch (...) {
+                    std::cout << "Non-numeric key/value: " << key_str << " -> " << entry.data << std::endl;
+                }
+            }
+            
+            bool all_valid = true;
+            for (const auto& [range_start, kvs] : ranges) {
+                int sum = 0;
+                for (const auto& [k, v] : kvs) {
+                    sum += v;
+                }
+                
+                std::cout << "Range [" << range_start << "-" << (range_start + 99) << "]: "
+                          << kvs.size() << " keys, sum=" << sum;
+                
+                if (sum % 100 != 0) {
+                    std::cout << " *** VIOLATION! Not divisible by 100 ***" << std::endl;
+                    all_valid = false;
+                    
+                    // Show all keys in this range for debugging
+                    std::cout << "  Keys in range: ";
+                    for (const auto& [k, v] : kvs) {
+                        std::cout << k << "=" << v << " ";
+                    }
+                    std::cout << std::endl;
+                } else {
+                    std::cout << " OK" << std::endl;
+                }
+            }
+            
+            std::cout << "Total ranges with data: " << ranges.size() << std::endl;
+            std::cout << "Total keys in table: " << table->data.size() << std::endl;
+            std::cout << "=== END CONSISTENCY CHECK ===" << std::endl << std::endl;
+            
+            return all_valid;
+        }
+        
     };
 
-// class KVTManagerWrapper2pl: public KVTManagerWrapperBase
-// {
-//     //For table, the meta data in an entry is locked (1) or not (0);
-//     //For transaction context, the metadata in an entry is self-created (1) or alread existed (0)
-// public:    
-//     // Transaction management
-//     override bool commit_transaction(uint64_t tx_id, std::string& error_msg) {
-//         std::lock_guard<std::mutex> lock(global_mutex);
-//         if (tx_id == 0) {
-//             error_msg = "Transaction " + std::to_string(tx_id) + " not found";
-//             return false;
-//         }
-//         Transaction* tx = get_transaction(tx_id);
-//         if (!tx) {
-//             error_msg = "Transaction " + std::to_string(tx_id) + " not found";
-//             return false;
-//         }
+class KVTManagerWrapper2PL: public KVTManagerWrapperBase
+{
+    // For table entries: metadata field stores the locking transaction ID (0 = unlocked)
+    // When a transaction acquires a lock, it sets metadata to its tx_id
+public:
+    // Transaction management
+    bool commit_transaction(uint64_t tx_id, std::string& error_msg) override {
+        std::lock_guard<std::mutex> lock(global_mutex);
+        Transaction* tx = get_transaction(tx_id);
+        if (!tx) {
+            error_msg = "Transaction " + std::to_string(tx_id) + " not found";
+            return false;
+        }
+        
+        // DEBUG: Show what we're committing
+        std::cout << "\n==== DEBUG 2PL TX" << tx_id << " COMMIT START ====" << std::endl;
+        std::cout << "Write set size: " << tx->write_set.size() << std::endl;
+        std::cout << "Delete set size: " << tx->delete_set.size() << std::endl;
+        std::cout << "Read set size: " << tx->read_set.size() << std::endl;
+        
+        // Show a sample of writes
+        int write_count = 0;
+        for (const auto& [write_key, entry] : tx->write_set) {
+            if (write_count++ < 10) {
+                auto [table_name, key] = parse_table_key(write_key);
+                std::cout << "  Write: key=" << key << " value=" << entry.data 
+                          << " metadata=" << entry.metadata << std::endl;
+            }
+        }
+        
+        // Apply deletes first
+        for (const auto& delete_key : tx->delete_set) {
+            auto [table_name, key] = parse_table_key(delete_key);
+            Table* table = get_table(table_name);
+            if (table) {
+                auto it = table->data.find(key);
+                if (it != table->data.end()) {
+                    // Verify we hold the lock
+                    assert(it->second.metadata == static_cast<int32_t>(tx_id));
+                    std::cout << "  DEBUG: Deleting key=" << key << " old_value=" << it->second.data << std::endl;
+                    table->data.erase(it);
+                }
+            }
+        }
+        
+        // Apply writes
+        for (const auto& [write_key, entry] : tx->write_set) {
+            auto [table_name, key] = parse_table_key(write_key);
+            Table* table = get_table(table_name);
+            if (table) {
+                auto it = table->data.find(key);
+                if (it != table->data.end()) {
+                    // Verify we hold the lock
+                    assert(it->second.metadata == static_cast<int32_t>(tx_id));
+                    std::string old_value = it->second.data;
+                    // Install the write and release the lock
+                    it->second.data = entry.data;
+                    it->second.metadata = 0;  // Release lock
+                    
+                    // DEBUG
+                    static int debug_write_count = 0;
+                    if (debug_write_count++ < 20) {
+                        std::cout << "  DEBUG: Writing key=" << key << " old=" << old_value 
+                                  << " new=" << entry.data << std::endl;
+                    }
+                } else {
+                    // This shouldn't happen - we should have created a placeholder
+                    // But handle it just in case
+                    std::cout << "  DEBUG: Creating new entry key=" << key << " value=" << entry.data << std::endl;
+                    table->data[key] = Entry(entry.data, 0);
+                }
+            }
+        }
+        
+        // Release read locks
+        int read_lock_releases = 0;
+        for (const auto& [read_key, entry] : tx->read_set) {
+            // Skip if this key was also written or deleted
+            if (tx->write_set.find(read_key) != tx->write_set.end() ||
+                tx->delete_set.find(read_key) != tx->delete_set.end()) {
+                continue;
+            }
+            
+            auto [table_name, key] = parse_table_key(read_key);
+            Table* table = get_table(table_name);
+            if (table) {
+                auto it = table->data.find(key);
+                if (it != table->data.end()) {
+                    assert(it->second.metadata == static_cast<int32_t>(tx_id));
+                    it->second.metadata = 0;  // Release the lock
+                    read_lock_releases++;
+                }
+            }
+        }
+        
+        std::cout << "Released " << read_lock_releases << " read-only locks" << std::endl;
+        std::cout << "==== DEBUG 2PL TX" << tx_id << " COMMIT END ====" << std::endl;
+        
+        transactions.erase(tx_id);
+        return true;
+    }
+    
+    bool rollback_transaction(uint64_t tx_id, std::string& error_msg) override {
+        std::lock_guard<std::mutex> lock(global_mutex);
+        Transaction* tx = get_transaction(tx_id);
+        if (!tx) {
+            error_msg = "Transaction " + std::to_string(tx_id) + " not found";
+            return false;
+        }
+        
+        // Release all locks held by this transaction
+        // Release write locks (for keys that were to be written but not yet)
+        for (const auto& [write_key, entry] : tx->write_set) {
+            auto [table_name, key] = parse_table_key(write_key);
+            Table* table = get_table(table_name);
+            if (table) {
+                auto it = table->data.find(key);
+                if (it != table->data.end() && it->second.metadata == static_cast<int32_t>(tx_id)) {
+                    // If this was a new key (metadata=1 in write_set entry), remove the placeholder
+                    if (entry.metadata == 1) {
+                        table->data.erase(it);
+                    } else {
+                        it->second.metadata = 0;  // Release the lock
+                    }
+                }
+            }
+        }
+        
+        // Release read locks
+        for (const auto& [read_key, entry] : tx->read_set) {
+            auto [table_name, key] = parse_table_key(read_key);
+            Table* table = get_table(table_name);
+            if (table) {
+                auto it = table->data.find(key);
+                if (it != table->data.end() && it->second.metadata == static_cast<int32_t>(tx_id)) {
+                    it->second.metadata = 0;  // Release the lock
+                }
+            }
+        }
+        
+        // Release delete locks
+        for (const auto& delete_key : tx->delete_set) {
+            auto [table_name, key] = parse_table_key(delete_key);
+            Table* table = get_table(table_name);
+            if (table) {
+                auto it = table->data.find(key);
+                if (it != table->data.end() && it->second.metadata == static_cast<int32_t>(tx_id)) {
+                    it->second.metadata = 0;  // Release the lock
+                }
+            }
+        }
+        
+        transactions.erase(tx_id);
+        return true;
+    }
+    
+    bool get(uint64_t tx_id, const std::string& table_name, const std::string& key,
+             std::string& value, std::string& error_msg) override {
+        std::lock_guard<std::mutex> lock(global_mutex);
+        
+        // One-shot read
+        if (tx_id == 0) {
+            Table* table = get_table(table_name);
+            if (!table) {
+                error_msg = "Table " + table_name + " not found";
+                return false;
+            }
+            auto it = table->data.find(key);
+            if (it == table->data.end()) {
+                error_msg = "Key " + key + " not found";
+                return false;
+            }
+            if (it->second.metadata != 0) {
+                error_msg = "Key " + key + " is locked by transaction " + std::to_string(it->second.metadata);
+                return false;
+            }
+            value = it->second.data;
+            return true;
+        }
+        
+        Transaction* tx = get_transaction(tx_id);
+        if (!tx) {
+            error_msg = "Transaction " + std::to_string(tx_id) + " not found";
+            return false;
+        }
+        
+        std::string table_key = make_table_key(table_name, key);
+        
+        // Check if deleted in this transaction
+        if (tx->delete_set.find(table_key) != tx->delete_set.end()) {
+            error_msg = "Key " + key + " is deleted";
+            return false;
+        }
+        
+        // Check write set
+        auto write_it = tx->write_set.find(table_key);
+        if (write_it != tx->write_set.end()) {
+            value = write_it->second.data;
+            return true;
+        }
+        
+        // Check read set
+        auto read_it = tx->read_set.find(table_key);
+        if (read_it != tx->read_set.end()) {
+            value = read_it->second.data;
+            return true;
+        }
+        
+        // Need to read from table and acquire lock
+        Table* table = get_table(table_name);
+        if (!table) {
+            error_msg = "Table " + table_name + " not found";
+            return false;
+        }
+        
+        auto it = table->data.find(key);
+        if (it == table->data.end()) {
+            error_msg = "Key " + key + " not found";
+            return false;
+        }
+        
+        // Check if locked by another transaction
+        if (it->second.metadata != 0 && it->second.metadata != static_cast<int32_t>(tx_id)) {
+            error_msg = "Key " + key + " is locked by transaction " + std::to_string(it->second.metadata);
+            return false;
+        }
+        
+        // Acquire lock
+        it->second.metadata = static_cast<int32_t>(tx_id);
+        tx->read_set[table_key] = it->second;
+        value = it->second.data;
+        return true;
+    }
+    
+    bool set(uint64_t tx_id, const std::string& table_name, const std::string& key,
+             const std::string& value, std::string& error_msg) override {
+        std::lock_guard<std::mutex> lock(global_mutex);
+        
+        if (tx_id == 0) {
+            error_msg = "One-shot transactions not allowed for write operations";
+            return false;
+        }
+        
+        Transaction* tx = get_transaction(tx_id);
+        if (!tx) {
+            error_msg = "Transaction " + std::to_string(tx_id) + " not found";
+            return false;
+        }
+        
+        std::string table_key = make_table_key(table_name, key);
+        
+        // Remove from delete set if it was there
+        tx->delete_set.erase(table_key);
+        
+        // Check if we already have it in write set
+        if (tx->write_set.find(table_key) != tx->write_set.end()) {
+            tx->write_set[table_key].data = value;
+            return true;
+        }
+        
+        // Need to acquire lock if we don't already have it
+        Table* table = get_table(table_name);
+        if (!table) {
+            error_msg = "Table " + table_name + " not found";
+            return false;
+        }
+        
+        auto it = table->data.find(key);
+        bool key_exists = (it != table->data.end());
+        
+        // If key exists, check if it's locked
+        if (key_exists) {
+            if (it->second.metadata != 0 && it->second.metadata != static_cast<int32_t>(tx_id)) {
+                error_msg = "Key " + key + " is locked by transaction " + std::to_string(it->second.metadata);
+                return false;
+            }
+            // Acquire or maintain lock
+            it->second.metadata = static_cast<int32_t>(tx_id);
+            // Track original value in read set if not already there
+            if (tx->read_set.find(table_key) == tx->read_set.end()) {
+                tx->read_set[table_key] = it->second;
+            }
+        } else {
+            // New key - create placeholder with lock
+            table->data[key] = Entry("", static_cast<int32_t>(tx_id));
+        }
+        
+        // Add to write set
+        tx->write_set[table_key] = Entry(value, key_exists ? 0 : 1);  // metadata tracks if new
+        return true;
+    }
+    
+    bool del(uint64_t tx_id, const std::string& table_name, const std::string& key,
+             std::string& error_msg) override {
+        std::lock_guard<std::mutex> lock(global_mutex);
+        
+        if (tx_id == 0) {
+            error_msg = "One-shot transactions not allowed for delete operations";
+            return false;
+        }
+        
+        Transaction* tx = get_transaction(tx_id);
+        if (!tx) {
+            error_msg = "Transaction " + std::to_string(tx_id) + " not found";
+            return false;
+        }
+        
+        std::string table_key = make_table_key(table_name, key);
+        
+        // Remove from write set if it was there
+        auto write_it = tx->write_set.find(table_key);
+        if (write_it != tx->write_set.end()) {
+            // If it was a new key we were going to add, just remove it
+            if (write_it->second.metadata == 1) {
+                // Release the lock on the placeholder
+                Table* table = get_table(table_name);
+                if (table) {
+                    auto it = table->data.find(key);
+                    if (it != table->data.end() && it->second.metadata == static_cast<int32_t>(tx_id)) {
+                        table->data.erase(it);
+                    }
+                }
+                tx->write_set.erase(write_it);
+                return true;
+            }
+            tx->write_set.erase(write_it);
+        }
+        
+        // Need to acquire lock on the key to delete
+        Table* table = get_table(table_name);
+        if (!table) {
+            error_msg = "Table " + table_name + " not found";
+            return false;
+        }
+        
+        auto it = table->data.find(key);
+        if (it == table->data.end()) {
+            error_msg = "Key " + key + " not found";
+            return false;
+        }
+        
+        // Check if locked by another transaction
+        if (it->second.metadata != 0 && it->second.metadata != static_cast<int32_t>(tx_id)) {
+            error_msg = "Key " + key + " is locked by transaction " + std::to_string(it->second.metadata);
+            return false;
+        }
+        
+        // Acquire lock
+        it->second.metadata = static_cast<int32_t>(tx_id);
+        
+        // Add to read set (to track the lock) and delete set
+        if (tx->read_set.find(table_key) == tx->read_set.end()) {
+            tx->read_set[table_key] = it->second;
+        }
+        tx->delete_set.insert(table_key);
+        return true;
+    }
+    
+    bool scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start,
+              const std::string& key_end, size_t num_item_limit,
+              std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) override {
+        std::lock_guard<std::mutex> lock(global_mutex);
+        
+        Table* table = get_table(table_name);
+        if (!table) {
+            error_msg = "Table " + table_name + " not found";
+            return false;
+        }
+        
+        results.clear();
+        
+        // DEBUG
+        static int scan_count = 0;
+        if (scan_count++ < 5) {
+            std::cout << "DEBUG SCAN TX" << tx_id << " range [" << key_start << "-" << key_end 
+                      << "] limit=" << num_item_limit << std::endl;
+            int count = 0;
+            for (auto it = table->data.lower_bound(key_start);
+                 it != table->data.end() && it->first <= key_end && count++ < 10;
+                 ++it) {
+                std::cout << "  Key=" << it->first << " metadata=" << it->second.metadata 
+                          << " value=" << it->second.data << std::endl;
+            }
+        }
+        
+        // One-shot scan
+        if (tx_id == 0) {
+            for (auto it = table->data.lower_bound(key_start); 
+                 it != table->data.end() && it->first <= key_end && results.size() < num_item_limit;
+                 ++it) {
+                if (it->second.metadata != 0) {
+                    continue;  // Skip locked keys
+                }
+                results.emplace_back(it->first, it->second.data);
+            }
+            return true;
+        }
+        
+        Transaction* tx = get_transaction(tx_id);
+        if (!tx) {
+            error_msg = "Transaction " + std::to_string(tx_id) + " not found";
+            return false;
+        }
+        
+        // Collect results from write set and table
+        std::map<std::string, std::string> temp_results;
+        
+        // First add from write set
+        std::string table_key_start = make_table_key(table_name, key_start);
+        std::string table_key_end = make_table_key(table_name, key_end);
+        
+        for (auto it = tx->write_set.lower_bound(table_key_start);
+             it != tx->write_set.end() && it->first < table_key_end;
+             ++it) {
+            auto [tbl_name, key] = parse_table_key(it->first);
+            if (tbl_name == table_name) {
+                temp_results[key] = it->second.data;
+            }
+        }
+        
+        // Then scan table
+        for (auto it = table->data.lower_bound(key_start);
+             it != table->data.end() && it->first <= key_end;
+             ++it) {
+            std::string table_key = make_table_key(table_name, it->first);
+            
+            // Skip if deleted
+            if (tx->delete_set.find(table_key) != tx->delete_set.end()) {
+                continue;
+            }
+            
+            // Skip if already in write set
+            if (temp_results.find(it->first) != temp_results.end()) {
+                continue;
+            }
+            
+            // Check if locked by another transaction
+            if (it->second.metadata != 0 && it->second.metadata != static_cast<int32_t>(tx_id)) {
+                error_msg = "Key " + it->first + " is locked by transaction " + std::to_string(it->second.metadata);
+                return false;
+            }
+            
+            // Acquire lock if not already held
+            if (it->second.metadata == 0) {
+                it->second.metadata = static_cast<int32_t>(tx_id);
+                tx->read_set[table_key] = it->second;
+            }
+            
+            temp_results[it->first] = it->second.data;
+        }
+        
+        // Convert to results vector
+        for (const auto& [key, value] : temp_results) {
+            results.emplace_back(key, value);
+            if (results.size() >= num_item_limit) {
+                break;
+            }
+        }
+        
+        return true;
+    }
+};
 
-//         for (const auto& write_pair : tx->write_set) {
-//             std::pair<std::string, std::string> table_name_key = parse_table_key(write_pair.first);
-//             Table* table = get_table(table_name_key.first);
-//             if (!table) {
-//                 error_msg = "Table " + table_name_key.first + " not found";
-//                 return false;
-//             }
-//             //I must already hold the lock. so I can directly update the table and release the lock
-//             table->data[table_name_key.second] = write_pair.second.data;
-//             assert(table->data[table_name_key.second].is_locked);
-//             table->data[table_name_key.second].is_locked = false;
-//         }
-//         for (const auto& read_pair : tx->read_set) {
-//             std::pair<std::string, std::string> table_name_key = parse_table_key(read_pair.first);
-//             Table* table = get_table(table_name_key.first);
-//             if (!table) {
-//                 error_msg = "Table " + table_name_key.first + " not found";
-//                 return false;
-//             }
-//             assert(table->data[table_name_key.second].is_locked);
-//             table->data[table_name_key.second].is_locked = false;
-//         }
-//         for (const auto& delete_pair : tx->delete_set) {
-//             std::pair<std::string, std::string> table_name_key = parse_table_key(delete_pair);
-//             Table* table = get_table(table_name_key.first);
-//             if (!table) {
-//                 error_msg = "Table " + table_name_key.first + " not found";
-//                 return false;
-//             }
-//             assert (table->data[table_name_key.second].is_locked); //I must have the lock when I delete
-//             table->data.erase(table_name_key.second);
-//         }
-//         transactions.erase(tx_id);
-//         return true;
-//     }
 
-//     override bool rollback_transaction(uint64_t tx_id, std::string& error_msg) 
-//     {
-//         std::lock_guard<std::mutex> lock(global_mutex);
-//         if (tx_id == 0) {
-//             error_msg = "Transaction " + std::to_string(tx_id) + " not found";
-//             return false;
-//         }
-//         Transaction* tx = get_transaction(tx_id);
-//         if (!tx) {
-//             error_msg = "Transaction " + std::to_string(tx_id) + " not found";
-//             return false;
-//         }
-//         for (const auto& read_pair : tx->read_set) {
-//             std::pair<std::string, std::string> table_name_key = parse_table_key(read_pair.first);
-//             Table* table = get_table(table_name_key.first);
-//             if (!table) {
-//                 error_msg = "Table " + table_name_key.first + " not found";
-//                 return false;
-//             }
-//             assert(table->data[table_name_key.second].is_locked);
-//             table->data[table_name_key.second].is_locked = false;
-//         }
-//         for (const auto& write_pair : tx->write_set) {
-//             std::pair<std::string, std::string> table_name_key = parse_table_key(write_pair.first);
-//             Table* table = get_table(table_name_key.first);
-//             if (!table) {
-//                 error_msg = "Table " + table_name_key.first + " not found";
-//                 return false;
-//             }
-//             assert(table->data[table_name_key.second].is_locked);
-//             table->data[table_name_key.second].is_locked = false;
-//         }
 
-//         for (const auto& delete_pair : tx->delete_set) {
-//             std::pair<std::string, std::string> table_name_key = parse_table_key(delete_pair);
-//             Table* table = get_table(table_name_key.first);
-//             if (!table) {
-//                 error_msg = "Table " + table_name_key.first + " not found";
-//                 return false;
-//             }
-//             assert(table->data[table_name_key.second].is_locked);
-//             table->data[table_name_key.second].is_locked = false;
-//         }
-//         transactions.erase(tx_id);
-//         return true;
-//     }
 
     
-//     override bool get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
-//              std::string& value, std::string& error_msg)
-//     {
-//         std::lock_guard<std::mutex> lock(global_mutex);
-//         if (tx_id == 0) {
-//             Table* table = get_table(table_name);
-//             if (!table) {
-//                 error_msg = "Table " + table_name + " not found";
-//                 return false;
-//             }
-//             auto it = table->data.find(key);
-//             if (it == table->data.end()) {
-//                 error_msg = "Key " + key + " not found";
-//                 return false;
-//             }
-//             if (it->second.is_locked) {
-//                 error_msg = "Key " + key + " is locked by another transaction";
-//                 return false;
-//             }
-//             value = it->second.data;
-//             return true;
-//         }
-//         Transaction* tx = get_transaction(tx_id);
-//         if (!tx) {
-//             error_msg = "Transaction " + std::to_string(tx_id) + " not found";
-//             return false;
-//         }
-//         std::string table_key = make_table_key(table_name, key);
-//         if (tx->delete_set.find(table_key) != tx->delete_set.end()) {
-//             error_msg = "Key " + key + " is deleted";
-//             return false;
-//         }
-//         auto write_itr = tx->write_set.find(table_key);
-//         if (write_itr != tx->write_set.end()) {
-//             value = write_itr->second.data;
-//             return true;
-//         }
-//         auto read_itr = tx->read_set.find(table_key);
-//         if (read_itr != tx->read_set.end()) {
-//             value = read_itr->second.data;
-//             return true;
-//         }
-//         Table* table = get_table(table_name);
-//         if (!table) {
-//             error_msg = "Table " + table_name + " not found";
-//             return false;
-//         }
-//         auto it = table->data.find(key);
-//         if (it == table->data.end()) {
-//             error_msg = "Key " + key + " not found";
-//             return false;
-//         }
-//         if (it->second.is_locked) {
-//             error_msg = "Key " + key + " is locked by another transaction";
-//             return false;
-//         }
-//         it->second.is_locked = true;
-//         tx->read_set[table_key] = it->second;
-//         value = it->second.data;
-//         return true;
-//     }
     
-//     override bool set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
-//              const std::string& value, std::string& error_msg)
-//     {
-//         std::lock_guard<std::mutex> lock(global_mutex);
-//         if (tx_id == 0) {
-//             Table* table = get_table(table_name);
-//             if (!table) {
-//                 error_msg = "Table " + table_name + " not found";
-//                 return false;
-//             }
-//             auto it = table->data.find(key);
-//             if (it != table->data.end() && it->second.is_locked) {
-//                 error_msg = "Key " + key + " is locked by another transaction";
-//                 return false;
-//             }
-//             table->data[key] = Value(value, false);
-//             return true;
-//         }
-//         Transaction* tx = get_transaction(tx_id);
-//         if (!tx) {
-//             error_msg = "Transaction " + std::to_string(tx_id) + " not found";
-//             return false;
-//         }
-//         std::string table_key = make_table_key(table_name, key);
-//         if (tx->delete_set.find(table_key) != tx->delete_set.end()) {
-//             tx->delete_set.erase(table_key);
-//         }
-//         if (tx->write_set.find(table_key) != tx->write_set.end()) {
-//             tx->write_set[table_key].data = value;
-//         }
-//         else {
-//             Table *table = get_table(table_name);
-//             if (!table) {
-//                 error_msg = "Table " + table_name + " not found";
-//                 return false;
-//             }
-//             if (table->data.find(key) != table->data.end() && table->data[key].is_locked) {
-//                 error_msg = "Key " + key + " is locked by another transaction";
-//                 return false;
-//             }
-//             table->data[key] = Value(value, false);
-//             return true;
-//         }
-//     }
-//     override bool del(uint64_t tx_id, const std::string& table_name, const std::string& key, 
-//             std::string& error_msg);
-//     override bool scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
-//               const std::string& key_end, size_t num_item_limit, 
-//               std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg);
-// };
 
 class KVTManagerWrapperOCC: public KVTManagerWrapperBase
 {
@@ -770,6 +1086,22 @@ public:
             error_msg = "Transaction " + std::to_string(tx_id) + " not found";
             return false;
         }
+        
+        // DEBUG: Show what we're committing
+        std::cout << "\n==== DEBUG OCC TX" << tx_id << " COMMIT START ====" << std::endl;
+        std::cout << "Write set size: " << tx->write_set.size() << std::endl;
+        std::cout << "Delete set size: " << tx->delete_set.size() << std::endl;
+        std::cout << "Read set size: " << tx->read_set.size() << std::endl;
+        
+        // Show a sample of writes
+        int write_count = 0;
+        for (const auto& [write_key, entry] : tx->write_set) {
+            if (write_count++ < 10) {
+                auto [table_name, key] = parse_table_key(write_key);
+                std::cout << "  Write: key=" << key << " value=" << entry.data << std::endl;
+            }
+        }
+        
         //first check if the readset versions are still valid
         for (const auto& read_pair : tx->read_set) {
             auto [table_name, key] = parse_table_key(read_pair.first);
@@ -792,15 +1124,28 @@ public:
             assert(table);
             auto itr = table->data.find(key);
             assert (itr != table->data.end());
+            std::cout << "  DEBUG: Deleting key=" << key << " old_value=" << itr->second.data << std::endl;
             table->data.erase(itr);
         }
         for (const auto& write_pair : tx->write_set) {
             auto [table_name, key] = parse_table_key(write_pair.first);
             Table* table = get_table(table_name);
             assert(table);
+            
+            std::string old_value = (table->data.find(key) != table->data.end()) ? table->data[key].data : "NEW";
             uint64_t new_version = (table->data.find(key) != table->data.end()) ? table->data[key].metadata + 1 : 1;
             table->data[key] = Entry(write_pair.second.data, static_cast<int32_t>(new_version));
+            
+            // DEBUG
+            static int debug_write_count = 0;
+            if (debug_write_count++ < 20) {
+                std::cout << "  DEBUG: Writing key=" << key << " old=" << old_value 
+                          << " new=" << write_pair.second.data << " version=" << new_version << std::endl;
+            }
         }
+        
+        std::cout << "==== DEBUG OCC TX" << tx_id << " COMMIT END ====" << std::endl;
+        
         transactions.erase(tx_id);
         return true;
     }
@@ -935,7 +1280,7 @@ public:
             return false;
         }
         if (tx_id == 0) {
-            for (auto itr = table->data.lower_bound(key_start); itr != table->data.end() && itr->first < key_end; ++itr) {
+            for (auto itr = table->data.lower_bound(key_start); itr != table->data.end() && itr->first <= key_end; ++itr) {
                 results.emplace_back(itr->first, itr->second.data);
                 if (results.size() >= num_item_limit) {
                     break;
@@ -953,7 +1298,7 @@ public:
             std::string table_key_start = make_table_key(table_name, key_start);
             std::string table_key_end = make_table_key(table_name, key_end);
             //first put all write_set into results
-            for (auto itr = tx->write_set.lower_bound(table_key_start); itr != tx->write_set.end() && itr->first < table_key_end; ++itr) {
+            for (auto itr = tx->write_set.lower_bound(table_key_start); itr != tx->write_set.end() && itr->first <= table_key_end; ++itr) {
                 auto [table_name, key] = parse_table_key(itr->first);
                 results_writes[key] = itr->second.data;
                 if (results_writes.size() >= num_item_limit) {
@@ -963,7 +1308,7 @@ public:
         }
         std::map<std::string, std::string> results_table;
         //now collect from table, put into read_set if necessary
-        for (auto itr = table->data.lower_bound(key_start); itr != table->data.end() && itr->first < key_end; ++itr) {
+        for (auto itr = table->data.lower_bound(key_start); itr != table->data.end() && itr->first <= key_end; ++itr) {
             if (results_writes.find(itr->first) != results_writes.end()) //already in write set, skip
                 continue;
             std::string table_key = make_table_key(table_name, itr->first);
