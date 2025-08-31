@@ -58,7 +58,11 @@ private:
     }
     
     std::string key_to_string(int key) {
-        return std::to_string(key);
+        // Zero-pad to 5 digits so string comparison matches numerical order
+        // MAX_KEY is 10000, so we need 5 digits
+        std::stringstream ss;
+        ss << std::setfill('0') << std::setw(5) << key;
+        return ss.str();
     }
     
     std::string value_to_string(int value) {
@@ -161,6 +165,11 @@ public:
                 
                 // Verify the constraint is satisfied
                 int total_sum = sum_without_first + needed_value;
+                if (total_sum % 100 != 0) {
+                    std::cerr << "ERROR in range " << range_id << ": sum=" << total_sum 
+                             << ", sum_without_first=" << sum_without_first 
+                             << ", needed_value=" << needed_value << std::endl;
+                }
                 assert(total_sum % 100 == 0);
             }
         }
