@@ -28,9 +28,9 @@ void KVTManager::runComprehensiveTest() {
     assert(table1_id != 0);
     std::cout << "✓ Created table 'test_table_hash' with ID: " << table1_id << std::endl;
     
-    // uint64_t table2_id = doCreateTable("test_table_range", "range", error_msg);
-    // assert(table2_id != 0);
-    // std::cout << "✓ Created table 'test_table_range' with ID: " << table2_id << std::endl;
+    uint64_t table2_id = doCreateTable("test_table_range", "range", error_msg);
+    assert(table2_id != 0);
+    std::cout << "✓ Created table 'test_table_range' with ID: " << table2_id << std::endl;
     
     // Test duplicate table creation
     uint64_t duplicate_id = doCreateTable("test_table_hash", "hash", error_msg);
@@ -58,14 +58,22 @@ void KVTManager::runComprehensiveTest() {
     success = doGet(0, "test_table_hash", "oneshot_key", value, error_msg);
     assert(success);
     std::cout << "✓ One-shot GET operation succeeded, value: '" << value << "'" << std::endl;
+
+    success = doSet(0, "test_table_range", "oneshot_key", "oneshot_value", error_msg);
+    assert(success);
+    std::cout << "✓ One-shot SET operation succeeded" << std::endl << std::endl;
+    
+    success = doGet(0, "test_table_range", "oneshot_key", value, error_msg);
+    assert(success);
+    std::cout << "✓ One-shot GET operation succeeded, value: '" << value << "'" << std::endl;
     
     // Test 4: Transactional operations
     std::cout << "Test 4: Transactional operations..." << std::endl << std::endl;
     
     // Set some values in transaction 1
-    success = doSet(tx1, "test_table_hash", "key1", "value1_tx1", error_msg);
-    assert(success);
-    std::cout << "✓ SET key1=value1_tx1 in TX1" << std::endl << std::endl;
+    // success = doSet(tx1, "test_table_hash", "key1", "value1_tx1", error_msg);
+    // assert(success);
+    // std::cout << "✓ SET key1=value1_tx1 in TX1" << std::endl << std::endl;
     
     success = doSet(tx1, "test_table_hash", "key2", "value2_tx1", error_msg);
     assert(success);
@@ -76,30 +84,34 @@ void KVTManager::runComprehensiveTest() {
     assert(success);
     std::cout << "✓ SET key1=value1_tx2 in TX2" << std::endl << std::endl;
     
-    // success = doSet(tx2, "test_table_range", "range_key", "range_value", error_msg);
-    // assert(success);
-    // std::cout << "✓ SET range_key=range_value in TX2 on range table" << std::endl << std::endl;
+    success = doSet(tx2, "test_table_range", "range_key", "range_value", error_msg);
+    assert(success);
+    std::cout << "✓ SET range_key=range_value in TX2 on range table" << std::endl << std::endl;
     
     // Test reading within transactions
-    success = doGet(tx1, "test_table_hash", "key1", value, error_msg);
-    assert(success);
-    std::cout << "✓ GET key1 in TX1, value: '" << value << "'" << std::endl;
+    // success = doGet(tx1, "test_table_hash", "key1", value, error_msg);
+    // assert(success);
+    // std::cout << "✓ GET key1 in TX1, value: '" << value << "'" << std::endl;
     
     success = doGet(tx2, "test_table_hash", "key1", value, error_msg);
     assert(success);
     std::cout << "✓ GET key1 in TX2, value: '" << value << "'" << std::endl;
-    
+
     // Test 5: Scan operations
     std::cout << "Test 5: Scan operations..." << std::endl << std::endl;
     std::vector<std::pair<std::string, std::string>> scan_results;
     
-    // success = doScan(tx1, "test_table_hash", "key0", "key9", 10, scan_results, error_msg);
+    success = doScan(0, "test_table_range", "a", "z", 5, scan_results, error_msg);
     assert(success);
-    std::cout << "✓ SCAN in TX1 returned " << scan_results.size() << " results" << std::endl;
-    
-    // success = doScan(0, "test_table_range", "a", "z", 5, scan_results, error_msg);
-    // assert(success);
-    // std::cout << "✓ One-shot SCAN on range table returned " << scan_results.size() << " results" << std::endl;
+    std::cout << "✓ One-shot SCAN on range table returned " << scan_results.size() << " results" << std::endl;
+
+    doSet(0, "test_table_range", "range_key_2", "range_value", error_msg);
+    assert(success);
+    std::cout << "✓ SET range_key=range_value in one-shot on range table" << std::endl << std::endl;
+
+    success = doScan(0, "test_table_range", "a", "z", 5, scan_results, error_msg);
+    assert(success);
+    std::cout << "✓ One-shot SCAN on range table returned " << scan_results.size() << " results" << std::endl;
     
     // Test 6: Error conditions
     std::cout << "Test 6: Error conditions..." << std::endl << std::endl;

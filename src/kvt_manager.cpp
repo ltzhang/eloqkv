@@ -206,7 +206,7 @@ uint64_t KVTManager::doStartTx(std::string& error_msg) {
     // Use default isolation level and concurrency control protocol
     txservice::TransactionExecution* txm = newTxm(
         txservice::IsolationLevel::ReadCommitted,
-        txservice::CcProtocol::Locking
+        txservice::CcProtocol::OccRead
     );
     
     if (!txm) {
@@ -236,7 +236,7 @@ bool KVTManager::doGet(uint64_t tx_id, const std::string& table_name, const std:
     
     if (auto_commit) {
         // Create one-shot transaction for auto-commit
-        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::Locking);
+        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::OccRead);
         if (!txm) {
             error_msg = "Failed to create transaction for GET";
             return false;
@@ -343,7 +343,7 @@ bool KVTManager::doSet(uint64_t tx_id, const std::string& table_name,
     
     if (auto_commit) {
         // Create one-shot transaction for auto-commit
-        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::Locking);
+        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::OccRead);
         if (!txm) {
             error_msg = "Failed to create transaction for SET";
             return false;
@@ -361,11 +361,11 @@ bool KVTManager::doSet(uint64_t tx_id, const std::string& table_name,
     bool is_hash_table = table->partition_method() == "hash";
 
     // First put a read lock on the table
-    TableName table_name_obj = is_hash_table ? txservice::internal_hash_table_name : txservice::internal_range_table_name;
+    TableName table_name_obj(is_hash_table ? txservice::internal_hash_table_name_sv 
+        : txservice::internal_range_table_name_sv, TableType::Primary, is_hash_table ?TableEngine::InternalHash : TableEngine::InternalRange);
     CatalogKey table_key(table_name_obj);
     TxKey tbl_tx_key(&table_key);
     CatalogRecord catalog_record;
-
 
     ReadTxRequest read_tx_req(&catalog_ccm_name, 0, &tbl_tx_key,
         &catalog_record, false, false, true, 0, false,
@@ -413,7 +413,17 @@ bool KVTManager::doSet(uint64_t tx_id, const std::string& table_name,
     record_ptr->SetEncodedBlob(reinterpret_cast<const unsigned char *>(value.data()), value.size());
     OperationType op_type = read_req.Result().first == RecordStatus::Deleted ? OperationType::Insert : OperationType::Update;
 
-    txm->TxUpsert(table_name_obj, schema_version, TxKey(std::move(key_ptr)), std::move(record_ptr), op_type);
+    UpsertTxRequest upsert_tx_req(
+        &table_name_obj, TxKey(std::move(key_ptr)), std::move(record_ptr), op_type, nullptr, nullptr);
+    txm->Execute(&upsert_tx_req);
+    upsert_tx_req.Wait();
+    if (upsert_tx_req.ErrorCode() != TxErrorCode::NO_ERROR) {
+        error_msg = "SET operation failed: " + std::to_string(static_cast<int>(upsert_tx_req.ErrorCode()));
+        if (auto_commit) {
+            txservice::AbortTx(txm);
+        }
+        return false;
+    }
 
     if (auto_commit) {
         auto commit_result = txservice::CommitTx(txm);
@@ -455,7 +465,7 @@ bool KVTManager::doScan(uint64_t tx_id, const std::string& table_name,
     
     if (auto_commit) {
         // Create one-shot transaction for auto-commit
-        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::Locking);
+        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::OccRead);
         if (!txm) {
             error_msg = "Failed to create transaction for scan";
             return false;
@@ -561,7 +571,13 @@ bool KVTManager::doScan(uint64_t tx_id, const std::string& table_name,
         batch_results.clear();
         
         // Execute scan batch request
-        txm->ProcessTxRequest(scan_batch);
+        txm->Execute(&scan_batch);
+        scan_batch.Wait();
+
+        if (scan_batch.ErrorCode() != TxErrorCode::NO_ERROR) {
+            error_msg = "Failed to execute scan batch: " + std::to_string(static_cast<int>(scan_batch.ErrorCode()));
+            return false;
+        }
         
         if (batch_results.empty()) {
             // No more results
@@ -596,6 +612,15 @@ bool KVTManager::doScan(uint64_t tx_id, const std::string& table_name,
                 total_fetched++;
             }
         }
+    }
+
+    // TODO(liunyl): unlock batch for keys that are not returned?
+    ScanCloseTxRequest scan_close(scan_alias, table_name_obj);
+    txm->Execute(&scan_close);
+    scan_close.Wait();
+    if (scan_close.ErrorCode() != TxErrorCode::NO_ERROR) {
+        error_msg = "Failed to close scan: " + std::to_string(static_cast<int>(scan_close.ErrorCode()));
+        return false;
     }
     
     // Auto-commit if needed

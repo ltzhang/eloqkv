@@ -1238,7 +1238,7 @@ bool RedisServiceImpl::Init(brpc::Server &brpc_server)
 
 #endif
 
-        for (const auto &table_name : redis_table_names_)
+        for (const auto &[table_name, _] : prebuilt_tables)
         {
             store_hd_->AppendPreBuiltTable(table_name);
         }
