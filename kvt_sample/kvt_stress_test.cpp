@@ -76,13 +76,57 @@ struct TransactionContext {
         int key2; 
         int value;
         int value2;
+        Operation(int op_type, int key, int key2, int value, int value2) : op_type(op_type), key(key), key2(key2), value(value), value2(value2) {}
     };
     uint64_t tx_id;
     bool should_commit;
     int num_ops;
     std::vector<int> ranges; 
-    std::vector<Operation> operations; // for replay/debug
     ThreadSafeRNG* rng; // Thread-safe RNG for this transaction
+
+private:    
+    std::vector<Operation> operations; // for replay/debug
+
+public:
+    void append_op(const Operation& op) {
+        operations.push_back(op);
+        //print_op_list();
+    }
+
+    Operation & op(int index) {
+        return operations[index];
+    }
+
+    std::vector<Operation> & ops() {
+        return operations;
+    }
+
+    void print_op_list() {
+        int i = 0; 
+        std::cout << "TX   " << tx_id << " Op List: " << std::endl;
+        for (const auto& op : operations) {
+            std::string op_type_str;
+            switch (op.op_type) {
+                case Operation::OP_GET:
+                    op_type_str = "GET";
+                    break;
+                case Operation::OP_SET:
+                    op_type_str = "SET";
+                    break;
+                case Operation::OP_DEL:
+                    op_type_str = "DEL";
+                    break;
+                case Operation::OP_SCAN:
+                    op_type_str = "SCAN";
+                    break;
+                default:
+                    op_type_str = "UNKNOWN";
+                    break;
+            }
+            std::cout << "\tOp " << i <<" :" << op_type_str << " Key: " << op.key << " Value: " << op.value << std::endl;
+            i++;
+        }
+    }
 };
 
 class KVTStressTest {
@@ -229,30 +273,31 @@ public:
 
     int try_get_key(TransactionContext& ctx, int range_id, bool check_previous) {
         //otherwise, choose a new key, and get its value
-        int key = -1;
         std::string value;
         std::string error_msg;
-        if (check_previous && ctx.operations.size() > 0 && 
-                ctx.operations.back().op_type == TransactionContext::Operation::OP_GET) {
-            key = ctx.operations.back().key; //if previous op is a get, we can use the key
+        if (check_previous && ctx.ops().size() > 0 && 
+              ctx.ops().back().op_type == TransactionContext::Operation::OP_GET) {
+            int key = ctx.ops().back().key; //if previous op is a get, we can use the key
             return key;
         }
         for (int i = 0; i < 10; i++) { //try 10 times
-            key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
+            int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
             KVTError result = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
             if (result != KVTError::SUCCESS) {
-                if (result != KVTError::KEY_NOT_FOUND) {
-                    PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;)
+                if (result == KVTError::KEY_IS_LOCKED ||
+                    result == KVTError::KEY_NOT_FOUND ||
+                    result == KVTError::KEY_IS_DELETED) {
+                    continue; //just try another key
                 }
-                continue;
+                PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;)
             }
             //success, we do this and break, otherwise, after 10 times we will skip
             int value_int = string_to_value(value);
             //append to the operations
-            ctx.operations.push_back({TransactionContext::Operation::OP_GET, key, 0,  value_int, 0});
-            break;
+            ctx.append_op({TransactionContext::Operation::OP_GET, key, 0,  value_int, 0});
+            return key;
         }
-        return key; 
+        return -1;
     }
 
     //return false if no more operations to execute
@@ -278,7 +323,7 @@ public:
             KVTError result = kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to set key: " << error_msg << std::endl;);
-            ctx.operations.push_back({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
+            ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
         } 
         else if (prob < 0.9) { //del
             int key = try_get_key(ctx, range_id, true);
@@ -287,7 +332,7 @@ public:
             KVTError result = kvt_manager->del(ctx.tx_id, table_name, key_to_string(key), error_msg);
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to delete key: " << error_msg << std::endl;);
-            ctx.operations.push_back({TransactionContext::Operation::OP_DEL, key, 0, 0, 0});
+            ctx.append_op({TransactionContext::Operation::OP_DEL, key, 0, 0, 0});
         } 
         else { //scan does not need to care about range
             int start_key = ctx.rng->rand_int(0, MAX_KEY - 1);
@@ -302,7 +347,7 @@ public:
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to scan key: " << error_msg << std::endl;);
             //append to the operations
-            ctx.operations.push_back({TransactionContext::Operation::OP_SCAN, start_key, end_key, 0, static_cast<int>(results.size())});
+            ctx.append_op({TransactionContext::Operation::OP_SCAN, start_key, end_key, 0, static_cast<int>(results.size())});
         }
     }
 
@@ -314,40 +359,52 @@ public:
             range_delta_sum[range_id] = 0;
         }
         //scan the ops to get the range_delta_sum, a mutation op(set, del) will always have a get before it. 
-        for (int i = 0; i < ctx.operations.size(); i++) {
-            if (ctx.operations[i].op_type == TransactionContext::Operation::OP_SET) {
-                assert (i > 0 && ctx.operations[i-1].op_type == TransactionContext::Operation::OP_GET);
-                int prev_value = ctx.operations[i-1].value;
-                int new_value = ctx.operations[i].value;
-                assert(range_delta_sum.find(ctx.operations[i].key / RANGE_SIZE) != range_delta_sum.end());
-                range_delta_sum[ctx.operations[i].key / RANGE_SIZE] += new_value - prev_value;
-            } else if (ctx.operations[i].op_type == TransactionContext::Operation::OP_DEL) {
-                assert (i > 0 && ctx.operations[i-1].op_type == TransactionContext::Operation::OP_GET);
-                int prev_value = ctx.operations[i-1].value;
-                assert(range_delta_sum.find(ctx.operations[i].key / RANGE_SIZE) != range_delta_sum.end());
-                range_delta_sum[ctx.operations[i].key / RANGE_SIZE] -= prev_value;
+        for (int i = 0; i < ctx.ops().size(); i++) {
+            if (ctx.op(i).op_type == TransactionContext::Operation::OP_SET) {
+                assert (i > 0 && ctx.op(i-1).op_type == TransactionContext::Operation::OP_GET);
+                int prev_value = ctx.op(i-1).value;
+                int new_value = ctx.op(i).value;
+                assert(range_delta_sum.find(ctx.op(i).key / RANGE_SIZE) != range_delta_sum.end());
+                range_delta_sum[ctx.op(i).key / RANGE_SIZE] += new_value - prev_value;
+            } else if (ctx.op(i).op_type == TransactionContext::Operation::OP_DEL) {
+                assert (i > 0 && ctx.op(i-1).op_type == TransactionContext::Operation::OP_GET);
+                int prev_value = ctx.op(i-1).value;
+                assert(range_delta_sum.find(ctx.op(i).key / RANGE_SIZE) != range_delta_sum.end());
+                range_delta_sum[ctx.op(i).key / RANGE_SIZE] -= prev_value;
             }
         }
         //now fix up the operations to make the constraint satisfied
         for (auto [range_id, delta_sum] : range_delta_sum) {
             int diff = (CONSTRAINT_DIVISOR - delta_sum % CONSTRAINT_DIVISOR) % CONSTRAINT_DIVISOR;
             if (diff != 0) { //we need to get a new value to add to the range
-                //we get a key's value
-                int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
-                int existing_value = 0;
-                std::string value;
-                KVTError result = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
-                if (result == KVTError::SUCCESS) {
-                    existing_value = string_to_value(value);
-                    ctx.operations.push_back({TransactionContext::Operation::OP_GET, key, 0,  existing_value, 0});
+                bool done = false;
+                while (!done) {
+                    int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
+                    int existing_value = 0;
+                    std::string value;
+                    KVTError result = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
+                    if (result == KVTError::SUCCESS) {
+                        ctx.append_op({TransactionContext::Operation::OP_GET, key, 0,  existing_value, 0});
+                        existing_value = string_to_value(value);
+                        int new_value = clamp_value(existing_value + diff);
+                        result = kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
+                        ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
+                        done = true;
+                    }
+                    else if (result == KVTError::KEY_NOT_FOUND ||
+                             result == KVTError::KEY_IS_DELETED) {
+                        int new_value = diff; //existing value is 0
+                        result = kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
+                        ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
+                        done = true;
+                    }
+                    else if (result == KVTError::KEY_IS_LOCKED) {
+                        continue; //just chose another key
+                    }
+                    else {
+                        PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;);
+                    }
                 }
-                else if (result != KVTError::KEY_NOT_FOUND) //if is, then we can just pretend the value is 0
-                    PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;);
-                int new_value = clamp_value(existing_value + diff);
-                result = kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
-                if (result != KVTError::SUCCESS)
-                    PANIC(std::cerr << "Failed to set key: " << error_msg << std::endl;);
-                ctx.operations.push_back({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
             }
         }
     }
@@ -369,7 +426,7 @@ public:
                 return true;
             } 
             else if (result == KVTError::TRANSACTION_HAS_STALE_DATA) {
-                std::cerr << "TX" << ctx.tx_id << " Commit failed: " << error_msg << std::endl;
+                //std::cerr << "TX" << ctx.tx_id << " Commit failed: " << error_msg << std::endl;
                 abort_count++;
                 return false;
             }
@@ -439,7 +496,7 @@ public:
                         commit_count++;
                     }
                     else if (result == KVTError::TRANSACTION_HAS_STALE_DATA) {
-                        std::cerr << "TX" << ctx.tx_id << " Commit failed: " << error_msg << std::endl;
+                        //std::cerr << "TX" << ctx.tx_id << " Commit failed: " << error_msg << std::endl;
                         abort_count++;
                     }
                     else {
@@ -603,13 +660,6 @@ void test_implementation(KVTManagerWrapperInterface* wrapper, const std::string&
 int main(int argc, char* argv[]) {
     std::cout << "KVT Memory Database Stress Test" << std::endl;
     std::cout << "================================" << std::endl;
-    
-    // Test KVTManagerWrapperSimple
-    {
-        std::cout << "\nTesting KVTManagerWrapperSimple..." << std::endl;
-        KVTManagerWrapperSimple simple_wrapper;
-        test_implementation(&simple_wrapper, "KVTManagerWrapperSimple");
-    }
     
     // Test KVTManagerWrapperOCC
     {

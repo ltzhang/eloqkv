@@ -601,8 +601,24 @@ KVTError KVTManagerWrapper2PL::set(uint64_t tx_id, const std::string& table_name
     std::lock_guard<std::mutex> lock(global_mutex);
     
     if (tx_id == 0) {
-        error_msg = "One-shot transactions not allowed for write operations";
-        return KVTError::ONE_SHOT_WRITE_NOT_ALLOWED;
+        Table* table = get_table(table_name);
+        if (!table) {
+            error_msg = "Table " + table_name + " not found";
+            return KVTError::TABLE_NOT_FOUND;
+        }
+        auto itr = table->data.find(key);
+        if (itr == table->data.end()) {
+            table->data[key] = Entry(value, 0); //not locked
+            return KVTError::SUCCESS;
+        }
+        if (itr->second.metadata == 0) { //not locked
+            itr->second.data = value; 
+            return KVTError::SUCCESS;
+        }
+        else {
+            error_msg = "Key " + key + " is locked by transaction " + std::to_string(itr->second.metadata);
+            return KVTError::KEY_IS_LOCKED; 
+        }
     }
     
     Transaction* tx = get_transaction(tx_id);
@@ -659,8 +675,24 @@ KVTError KVTManagerWrapper2PL::del(uint64_t tx_id, const std::string& table_name
     std::lock_guard<std::mutex> lock(global_mutex);
     
     if (tx_id == 0) {
-        error_msg = "One-shot transactions not allowed for delete operations";
-        return KVTError::ONE_SHOT_DELETE_NOT_ALLOWED;
+        Table* table = get_table(table_name);
+        if (!table) {
+            error_msg = "Table " + table_name + " not found";
+            return KVTError::TABLE_NOT_FOUND;
+        }
+        auto itr = table->data.find(key);
+        if (itr == table->data.end()) {
+            error_msg = "Key " + key + " not found";
+            return KVTError::KEY_NOT_FOUND;
+        }
+        if (itr->second.metadata == 0) { //not locked
+            table->data.erase(itr);
+            return KVTError::SUCCESS;
+        }
+        else {
+            error_msg = "Key " + key + " is locked by transaction " + std::to_string(itr->second.metadata);
+            return KVTError::KEY_IS_LOCKED; 
+        }
     }
     
     Transaction* tx = get_transaction(tx_id);
@@ -738,9 +770,7 @@ KVTError KVTManagerWrapper2PL::scan(uint64_t tx_id, const std::string& table_nam
         for (auto it = table->data.lower_bound(key_start); 
                 it != table->data.end() && it->first <= key_end && results.size() < num_item_limit;
                 ++it) {
-            if (it->second.metadata != 0) {
-                continue;  // Skip locked keys
-            }
+            //read operation just go through all keys, as locks are supposed to be "read lock"
             results.emplace_back(it->first, it->second.data);
         }
         return KVTError::SUCCESS;
@@ -758,44 +788,29 @@ KVTError KVTManagerWrapper2PL::scan(uint64_t tx_id, const std::string& table_nam
     // First add from write set
     std::string table_key_start = make_table_key(table_name, key_start);
     std::string table_key_end = make_table_key(table_name, key_end);
-    
+
     for (auto it = tx->write_set.lower_bound(table_key_start);
             it != tx->write_set.end() && it->first < table_key_end;
             ++it) {
         auto [tbl_name, key] = parse_table_key(it->first);
-        if (tbl_name == table_name) {
-            temp_results[key] = it->second.data;
-        }
+        assert (tbl_name == table_name); 
+        temp_results[key] = it->second.data;
     }
     
-    // Then scan table
+    // Then scan table, we do not lock the range or the read keys, 
+    // so we are "read committed" i.e. allow phantom
     for (auto it = table->data.lower_bound(key_start);
             it != table->data.end() && it->first <= key_end;
             ++it) {
         std::string table_key = make_table_key(table_name, it->first);
-        
         // Skip if deleted
         if (tx->delete_set.find(table_key) != tx->delete_set.end()) {
             continue;
         }
-        
         // Skip if already in write set
         if (temp_results.find(it->first) != temp_results.end()) {
             continue;
         }
-        
-        // Check if locked by another transaction
-        if (it->second.metadata != 0 && it->second.metadata != static_cast<int32_t>(tx_id)) {
-            error_msg = "Key " + it->first + " is locked by transaction " + std::to_string(it->second.metadata);
-            return KVTError::KEY_IS_LOCKED;
-        }
-        
-        // Acquire lock if not already held
-        if (it->second.metadata == 0) {
-            it->second.metadata = static_cast<int32_t>(tx_id);
-            tx->read_set[table_key] = it->second;
-        }
-        
         temp_results[it->first] = it->second.data;
     }
     
@@ -928,8 +943,18 @@ KVTError KVTManagerWrapperOCC::get(uint64_t tx_id, const std::string& table_name
     {
         std::lock_guard<std::mutex> lock(global_mutex);
         if (tx_id == 0) {
-            error_msg = "One shot transaction is not allowed for write operations";
-            return KVTError::ONE_SHOT_WRITE_NOT_ALLOWED;
+            Table* table = get_table(table_name);
+            if (!table) {
+                error_msg = "Table " + table_name + " not found";
+                return KVTError::TABLE_NOT_FOUND;
+            }
+            if (table->data.find(key) == table->data.end()) {
+                table->data[key] = Entry(value,1);
+            }
+            else {
+                table->data[key] = Entry(value,table->data[key].metadata + 1);
+            }
+            return KVTError::SUCCESS;
         }
         Transaction* tx = get_transaction(tx_id);
         if (!tx) {
@@ -949,8 +974,17 @@ KVTError KVTManagerWrapperOCC::del(uint64_t tx_id, const std::string& table_name
 {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (tx_id == 0) {
-        error_msg = "One shot transaction is not allowed for delete operations";
-        return KVTError::ONE_SHOT_DELETE_NOT_ALLOWED;
+        Table* table = get_table(table_name);
+        if (!table) {
+            error_msg = "Table " + table_name + " not found";
+            return KVTError::TABLE_NOT_FOUND;
+        }
+        if (table->data.find(key) == table->data.end()) {
+            error_msg = "Key " + key + " not found";
+            return KVTError::KEY_NOT_FOUND;
+        }
+        table->data.erase(key); 
+        return KVTError::SUCCESS;
     }
     Transaction* tx = get_transaction(tx_id);
     if (!tx) {
