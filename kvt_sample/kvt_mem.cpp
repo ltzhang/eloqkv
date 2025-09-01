@@ -3,12 +3,12 @@
 #include <stdexcept>
 
 // Global KVT manager instance
-std::unique_ptr<KVTManagerWrapperInterface> g_kvt_manager;
+std::unique_ptr<KVTManagerWrapper> g_kvt_manager;
 
 // Global KVT interface functions
 KVTError kvt_initialize() {
     try {
-        g_kvt_manager = std::make_unique<KVTManagerWrapperSimple>(); // Create simple wrapper
+        g_kvt_manager = std::make_unique<KVTManagerWrapper>(); // Create simple wrapper
         return KVTError::SUCCESS;
     } catch (const std::exception& e) {
         return KVTError::UNKNOWN_ERROR;

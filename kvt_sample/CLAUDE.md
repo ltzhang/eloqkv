@@ -8,14 +8,14 @@ The transactions must obey certain constraints. In a transaction, if we delete a
 
 At the start, we first populate the database (by, say add around 2000 keys out of the 10000), but make sure that the added key values obey the constraint. We do this by populate range by range, each range satisfy the constraint. After populating, we check consistency of the DB, if success, we perform tests. As stress test goes on, we do consistency check once in a while (say, every 100 transactions) by perform full scan of the DB and check consistent range onedo a range scan of a range that should obey constraint (say, from 200 to 400). Report error when we detect one. The range scan do not need to wait for every transaction to commit, as our transactional system suppose to gurantee isolation. 
 
+Notice that key must be fixed in size, because we use string comparison in Key Value, simple to_string method will not keep keys in order. 
+
 In each transaction execution, we need to focus on a small set of consistent ranges (say from 1 to 4), and track operations in each range, because generate random values to try to fit satisfy constraint is impossible. The steps should be:
-0) predetermine whether we want to abort or not. 
-1) decide a few (1 ~ 4) ranges, and track range modification sum. 
-2) decide number of ops in each range. 
-3) Now randomly choose a range, then randomly choose a key, then randomly choose an operation. If this is not the last operation for the range, just choose a random value to change upon the key, 
-4) If we predetermine to commit the transaction, and it is the last operation for this range, then calculate what value should we use to add/delete from the key so that the constraint can be met. 
-5) if not done, continue back to 3)
-6) commit or abort as you see fit. 
+1) Decide a few operations in a transaction (say around 20), predetermine whether we want to abort or not. 
+2) decide a few (1 ~ 4) ranges 
+3) When execution, randomly choose a range, then randomly choose a key, then randomly choose an operation to run. 
+4) After we finish a bunch of operations, if we predetermine to commit the transaction, we finish this transaction by fixing the operations in each range to obey the constraint. We calculate what value should we use to add/delete from the key so that the constraint can be met. 
+5) commit or abort as we decided before. 
 
 Values in the store (i.e when use kvt_get kvt_set) and so on are already being tracked correctly, so when you set a key with a value, next time you get from the key you will get the new value even before you commit. Keep this in mind, as delete will make you not able to read the old value (though the store keeps isolation so other transactions will not see the new values before your commit).
 

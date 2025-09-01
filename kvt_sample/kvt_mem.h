@@ -311,6 +311,6 @@ public:
   };
 
 
-typedef KVTManagerWrapperSimple KVTManagerWrapper;
+typedef KVTManagerWrapper2PL KVTManagerWrapper;
 
 #endif // KVT_MEM_H
