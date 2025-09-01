@@ -12,16 +12,16 @@
 // Implementation of the KVT API using the sample KVT manager
 std::unique_ptr<KVTManagerWrapper> g_kvt_manager = nullptr;
 
-bool kvt_initialize() {
+KVTError kvt_initialize() {
     if (g_kvt_manager) {
-        return true;  // Already initialized
+        return KVTError::SUCCESS;  // Already initialized
     }
     
     try {
         g_kvt_manager = std::make_unique<KVTManagerWrapper>();
-        return true;
+        return KVTError::SUCCESS;
     } catch (...) {
-        return false;
+        return KVTError::UNKNOWN_ERROR;
     }
 }
 
@@ -29,65 +29,66 @@ void kvt_shutdown() {
     g_kvt_manager.reset();
 }
 
-uint64_t kvt_create_table(const std::string& table_name, 
+KVTError kvt_create_table(const std::string& table_name, 
                           const std::string& partition_method,
+                          uint64_t& table_id,
                           std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT not initialized";
-        return 0;
+        return KVTError::KVT_NOT_INITIALIZED;
     }
     
-    return g_kvt_manager->create_table(table_name, partition_method, error_msg);
+    return g_kvt_manager->create_table(table_name, partition_method, table_id, error_msg);
 }
 
-uint64_t kvt_start_transaction(std::string& error_msg) {
+KVTError kvt_start_transaction(uint64_t& tx_id, std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT not initialized";
-        return 0;
+        return KVTError::KVT_NOT_INITIALIZED;
     }
     
-    return g_kvt_manager->start_transaction(error_msg);
+    return g_kvt_manager->start_transaction(tx_id, error_msg);
 }
 
-bool kvt_get(uint64_t tx_id, 
+KVTError kvt_get(uint64_t tx_id, 
             const std::string& table_name,
             const std::string& key,
             std::string& value,
             std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT not initialized";
-        return false;
+        return KVTError::KVT_NOT_INITIALIZED;
     }
     
     return g_kvt_manager->get(tx_id, table_name, key, value, error_msg);
 }
 
-bool kvt_set(uint64_t tx_id,
+KVTError kvt_set(uint64_t tx_id,
             const std::string& table_name,
             const std::string& key,
             const std::string& value,
             std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT not initialized";
-        return false;
+        return KVTError::KVT_NOT_INITIALIZED;
     }
     
     return g_kvt_manager->set(tx_id, table_name, key, value, error_msg);
 }
 
-bool kvt_del(uint64_t tx_id, 
+KVTError kvt_del(uint64_t tx_id, 
     const std::string& table_name,
     const std::string& key,
     std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT not initialized";
-        return false;
+        return KVTError::KVT_NOT_INITIALIZED;
     }
     
     return g_kvt_manager->del(tx_id, table_name, key, error_msg);
 }
 
-bool kvt_scan(uint64_t tx_id,
+KVTError kvt_scan(uint64_t tx_id,
              const std::string& table_name,
              const std::string& key_start,
              const std::string& key_end,
@@ -96,25 +97,25 @@ bool kvt_scan(uint64_t tx_id,
              std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT not initialized";
-        return false;
+        return KVTError::KVT_NOT_INITIALIZED;
     }
     
     return g_kvt_manager->scan(tx_id, table_name, key_start, key_end, num_item_limit, results, error_msg);
 }
 
-bool kvt_commit_transaction(uint64_t tx_id, std::string& error_msg) {
+KVTError kvt_commit_transaction(uint64_t tx_id, std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT not initialized";
-        return false;
+        return KVTError::KVT_NOT_INITIALIZED;
     }
     
     return g_kvt_manager->commit_transaction(tx_id, error_msg);
 }
 
-bool kvt_rollback_transaction(uint64_t tx_id, std::string& error_msg) {
+KVTError kvt_rollback_transaction(uint64_t tx_id, std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT not initialized";
-        return false;
+        return KVTError::KVT_NOT_INITIALIZED;
     }
     
     return g_kvt_manager->rollback_transaction(tx_id, error_msg);

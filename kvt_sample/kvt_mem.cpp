@@ -406,15 +406,15 @@ void kvt_shutdown() {
     g_kvt_manager.reset();
 }
 
-uint64_t kvt_create_table(const std::string& table_name, const std::string& partition_method, std::string& error_msg) {
+bool kvt_create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT system not initialized";
         return 0;
     }
-    return g_kvt_manager->create_table(table_name, partition_method, error_msg);
+    return g_kvt_manager->create_table(table_name, partition_method, table_id, error_msg);
 }
 
-uint64_t kvt_start_transaction(std::string& error_msg) {
+bool kvt_start_transaction(uint64_t& tx_id, std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT system not initialized";
         return 0;

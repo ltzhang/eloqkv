@@ -103,8 +103,8 @@ public:
         
         // Create table
         std::string error_msg;
-        table_id = kvt_manager->create_table(table_name, "range", error_msg);
-        if (table_id == 0)
+        KVTError result = kvt_manager->create_table(table_name, "range", table_id, error_msg);
+        if (result != KVTError::SUCCESS)
             PANIC(std::cerr << "Failed to create table: " << error_msg << std::endl;);
         // Populate initial data
         populate_initial_data(); 
@@ -131,20 +131,24 @@ public:
                 range_sum += value;
             }
             int diff = CONSTRAINT_DIVISOR - range_sum % CONSTRAINT_DIVISOR; 
-            key_values.begin().second += diff;
+            key_values.begin()->second += diff;
             for (auto [key, value] : key_values) {
-                kvt_manager->set(0, table_name, key_to_string(key), value_to_string(value), error_msg);
+                KVTError result = kvt_manager->set(0, table_name, key_to_string(key), value_to_string(value), error_msg);
+                if (result != KVTError::SUCCESS) {
+                    std::cerr << "Failed to populate initial data: " << error_msg << std::endl;
+                }
             }
         }
     }
     
-    bool check_consistency() {
+    bool check_consistency(const std::string& context = "") {
         std::string error_msg;
         uint64_t tx_id = 0;
         // Scan entire key range
         std::vector<std::pair<std::string, std::string>> all_results;
-        if (!kvt_manager->scan(tx_id, table_name, key_to_string(0), 
-                               key_to_string(MAX_KEY), MAX_KEY, all_results, error_msg))
+        KVTError result = kvt_manager->scan(tx_id, table_name, key_to_string(0), 
+                               key_to_string(MAX_KEY), MAX_KEY, all_results, error_msg);
+        if (result != KVTError::SUCCESS)
             PANIC(std::cerr << "Failed to scan database: " << error_msg << std::endl;);
         // Check constraints - results are sorted
         bool all_consistent = true;
@@ -175,12 +179,13 @@ public:
     TransactionContext create_transaction_context() {
         TransactionContext ctx;
         std::string error_msg;
-        ctx.tx_id = kvt_manager->start_transaction(error_msg);
-        if (ctx.tx_id == 0) 
+        KVTError result = kvt_manager->start_transaction(ctx.tx_id, error_msg);
+        if (result != KVTError::SUCCESS) 
             PANIC(std::cerr << "Failed to start transaction: " << error_msg << std::endl;);
         std::uniform_real_distribution<> commit_dist(0.0, 1.0);
         ctx.should_commit = commit_dist(rng) < COMMIT_RATIO;
         ctx.num_ops = rand() % MAX_OPS_PER_TX + 1;
+        ctx.total_ops_remaining = ctx.num_ops;
         int num_ranges = rand() % MAX_RANGES_PER_TX + 1;
         // Select random ranges
         for (int i = 0; i < num_ranges; i++) {
@@ -202,20 +207,27 @@ public:
         if (prob_dist(rng) < 0.4) { //get
             //choose a key from the range
             int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
-            if (!kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg))
-                PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;);
+            KVTError result = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
+            if (result != KVTError::SUCCESS) {
+                std::cerr << "Failed to get key: " << error_msg << std::endl;
+                return;
+            }
+            
             int value_int = string_to_value(value);
             //append to the operations
             ctx.operations.push_back({TransactionContext::Operation::OP_GET, key, 0,  value_int, 0});
-        } else if (prob_dist(rng) < 0.8) { //set
+        } 
+        else if (prob_dist(rng) < 0.8) { //set
             //scan the ops to see whether we have already got a key's value. 
             int key = -1;
             if (ctx.operations.size() > 0 && ctx.operations.back().op_type == TransactionContext::Operation::OP_GET) {
                 key = ctx.operations.back().key; //if previous op is a get, we can use the key
-            } else {
+            } 
+            else {
                 //otherwise, choose a new key, and get its value
                 int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
-                if (!kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg))
+                KVTError result = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
+                if (result != KVTError::SUCCESS)
                     PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;);
                 int value_int = string_to_value(value);
                 //append to the operations
@@ -223,26 +235,32 @@ public:
             }
             //choose a new value
             int new_value = rand() % MAX_VALUE;
-            if (!kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg))
+            KVTError result = kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
+            if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to set key: " << error_msg << std::endl;);
             ctx.operations.push_back({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
-        } else if (prob_dist(rng) < 0.9) { //del
+        } 
+        else if (prob_dist(rng) < 0.9) { //del
             int key = -1; 
             if (ctx.operations.size() > 0 && ctx.operations.back().op_type == TransactionContext::Operation::OP_GET) {
                 key = ctx.operations.back().key; //if previous op is a get, we can use the key
-            } else {
+            } 
+            else {
                 //otherwise, choose a new key, and get its value
                 int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
-                if (!kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg))
+                KVTError result = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
+                if (result != KVTError::SUCCESS)
                     PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;);
                 int value_int = string_to_value(value);
                 //append to the operations
                 ctx.operations.push_back({TransactionContext::Operation::OP_GET, key, 0,  value_int, 0});
             }
-            if (!kvt_manager->del(ctx.tx_id, table_name, key_to_string(key), error_msg))
+            KVTError result = kvt_manager->del(ctx.tx_id, table_name, key_to_string(key), error_msg);
+            if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to delete key: " << error_msg << std::endl;);
             ctx.operations.push_back({TransactionContext::Operation::OP_DEL, key, 0, 0, 0});
-        } else { //scan does not need to care about range
+        } 
+        else { //scan does not need to care about range
             int start_key = rand() % MAX_KEY;
             int end_key = rand() % MAX_KEY;
             if (start_key > end_key) {
@@ -251,10 +269,11 @@ public:
                 end_key = tmp;
             }
             std::vector<std::pair<std::string, std::string>> results;
-            if (!kvt_manager->scan(ctx.tx_id, table_name, key_to_string(start_key), key_to_string(end_key), RANGE_SIZE, results, error_msg))
+            KVTError result = kvt_manager->scan(ctx.tx_id, table_name, key_to_string(start_key), key_to_string(end_key), RANGE_SIZE, results, error_msg);
+            if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to scan key: " << error_msg << std::endl;);
             //append to the operations
-            ctx.operations.push_back({TransactionContext::Operation::OP_SCAN, start_key, end_key, 0, results.size()});
+            ctx.operations.push_back({TransactionContext::Operation::OP_SCAN, start_key, end_key, 0, static_cast<int>(results.size())});
         }
         ctx.total_ops_remaining--;
     }
@@ -293,29 +312,35 @@ public:
                 if (diff != CONSTRAINT_DIVISOR) { //we need to get a new value to add to the range
                     //we get a key's value
                     int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
-                    if (!kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg))
+                    std::string value;
+                    KVTError result = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
+                    if (result != KVTError::SUCCESS)
                         PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;);
                     int value_int = string_to_value(value);
                     //append to the operations
                     ctx.operations.push_back({TransactionContext::Operation::OP_GET, key, 0,  value_int, 0});
-                    kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(value_int + diff), error_msg);
+                    result = kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(value_int + diff), error_msg);
+                    if (result != KVTError::SUCCESS) {
+                        std::cerr << "Failed to set key: " << error_msg << std::endl;
+                    }
                     ctx.operations.push_back({TransactionContext::Operation::OP_SET, key, 0,  value_int + diff, 0});
                 }
             }
             //commit
-            bool success = kvt_manager->commit_transaction(ctx.tx_id, error_msg);
-            if (success) {
+            KVTError result = kvt_manager->commit_transaction(ctx.tx_id, error_msg);
+            if (result == KVTError::SUCCESS) {
                 commit_count++;
+                return true;
             } else {
                 std::cerr << "TX" << ctx.tx_id << " Commit failed: " << error_msg << std::endl;
                 abort_count++;
+                return false;
             }
-            return success;
         } else {
             //abort
-            bool success = kvt_manager->rollback_transaction(ctx.tx_id, error_msg);
+            KVTError result = kvt_manager->rollback_transaction(ctx.tx_id, error_msg);
             abort_count++;
-            return success;
+            return result == KVTError::SUCCESS;
         }
     }
 
@@ -327,7 +352,7 @@ public:
         
         for (int i = 0; i < num_transactions; i++) {
             TransactionContext ctx = create_transaction_context();
-            run_single_transaction(ctx);
+            run_single_transaction_normal(ctx);
             
             // Periodic consistency check
             if ((i + 1) % CONSISTENCY_CHECK_INTERVAL == 0) {
@@ -364,8 +389,8 @@ public:
                 
                 TransactionContext ctx = create_transaction_context();
                 std::string error_msg;
-                ctx.tx_id = kvt_manager->start_transaction(error_msg);
-                if (ctx.tx_id != 0) {
+                KVTError result = kvt_manager->start_transaction(ctx.tx_id, error_msg);
+                if (result == KVTError::SUCCESS) {
                     active_contexts.push_back(ctx);
                     started++;
                 }
@@ -390,12 +415,13 @@ public:
                     // Check constraint
                     bool constraint_satisfied = true;
                     // Check each affected range by scanning it
-                    for (int range_id : ctx.ranges_involved) {
+                    for (int range_id : ctx.ranges) {
                         std::string start_key = key_to_string(range_id * 100);
                         std::string end_key = key_to_string((range_id + 1) * 100);
                         
                         std::vector<std::pair<std::string, std::string>> range_data;
-                        if (!kvt_manager->scan(ctx.tx_id, table_name, start_key, end_key, 100, range_data, error_msg)) {
+                        KVTError result = kvt_manager->scan(ctx.tx_id, table_name, start_key, end_key, 100, range_data, error_msg);
+                        if (result != KVTError::SUCCESS) {
                             constraint_satisfied = false;
                             break;
                         }
@@ -414,19 +440,23 @@ public:
                     }
                     
                     if (constraint_satisfied) {
-                        success = kvt_manager->commit_transaction(ctx.tx_id, error_msg);
-                        if (success) {
+                        KVTError result = kvt_manager->commit_transaction(ctx.tx_id, error_msg);
+                        if (result == KVTError::SUCCESS) {
                             commit_count++;
+                            success = true;
                         } else {
                             abort_count++;
+                            success = false;
                         }
                     } else {
-                        success = kvt_manager->rollback_transaction(ctx.tx_id, error_msg);
+                        KVTError result = kvt_manager->rollback_transaction(ctx.tx_id, error_msg);
                         abort_count++;
+                        success = result == KVTError::SUCCESS;
                     }
                 } else {
-                    success = kvt_manager->rollback_transaction(ctx.tx_id, error_msg);
+                    KVTError result = kvt_manager->rollback_transaction(ctx.tx_id, error_msg);
                     abort_count++;
+                    success = result == KVTError::SUCCESS;
                 }
                 
                 transaction_count++;
@@ -455,7 +485,7 @@ public:
         
         for (int i = 0; i < num_transactions && test_running; i++) {
             TransactionContext ctx = create_transaction_context();
-            run_single_transaction(ctx);
+            run_single_transaction_normal(ctx);
         }
         
         std::cout << "Thread " << thread_id << " completed" << std::endl;
