@@ -424,7 +424,7 @@ class KVTManagerWrapperSimple : public KVTManagerWrapperInterface
                 ++itr;
             }
             
-            // CRITICAL FIX: Also include NEW keys from write_set that aren't in table_data yet
+            // Also include NEW keys from write_set that aren't in table_data yet
             for (const auto& [ws_key, ws_value] : write_set) {
                 if (ws_key >= table_key && ws_key < table_key_end) {
                     // Check if this key is not already in results (from table_data scan)
