@@ -406,22 +406,6 @@ KVTError KVTManagerWrapper2PL::commit_transaction(uint64_t tx_id, std::string& e
         return KVTError::TRANSACTION_NOT_FOUND;
     }
     
-    // DEBUG: Show what we're committing
-    std::cout << "\n==== DEBUG 2PL TX" << tx_id << " COMMIT START ====" << std::endl;
-    std::cout << "Write set size: " << tx->write_set.size() << std::endl;
-    std::cout << "Delete set size: " << tx->delete_set.size() << std::endl;
-    std::cout << "Read set size: " << tx->read_set.size() << std::endl;
-    
-    // Show a sample of writes
-    int write_count = 0;
-    for (const auto& [write_key, entry] : tx->write_set) {
-        if (write_count++ < 10) {
-            auto [table_name, key] = parse_table_key(write_key);
-            std::cout << "  Write: key=" << key << " value=" << entry.data 
-                        << " metadata=" << entry.metadata << std::endl;
-        }
-    }
-    
     // Apply deletes first
     for (const auto& delete_key : tx->delete_set) {
         auto [table_name, key] = parse_table_key(delete_key);
@@ -431,7 +415,6 @@ KVTError KVTManagerWrapper2PL::commit_transaction(uint64_t tx_id, std::string& e
             if (it != table->data.end()) {
                 // Verify we hold the lock
                 assert(it->second.metadata == static_cast<int32_t>(tx_id));
-                std::cout << "  DEBUG: Deleting key=" << key << " old_value=" << it->second.data << std::endl;
                 table->data.erase(it);
             }
         }
@@ -450,13 +433,6 @@ KVTError KVTManagerWrapper2PL::commit_transaction(uint64_t tx_id, std::string& e
                 // Install the write and release the lock
                 it->second.data = entry.data;
                 it->second.metadata = 0;  // Release lock
-                
-                // DEBUG
-                static int debug_write_count = 0;
-                if (debug_write_count++ < 20) {
-                    std::cout << "  DEBUG: Writing key=" << key << " old=" << old_value 
-                                << " new=" << entry.data << std::endl;
-                }
             } else {
                 // This shouldn't happen - we should have created a placeholder
                 // But handle it just in case
@@ -466,8 +442,6 @@ KVTError KVTManagerWrapper2PL::commit_transaction(uint64_t tx_id, std::string& e
         }
     }
     
-    // Release read locks
-    int read_lock_releases = 0;
     for (const auto& [read_key, entry] : tx->read_set) {
         // Skip if this key was also written or deleted
         if (tx->write_set.find(read_key) != tx->write_set.end() ||
@@ -482,13 +456,9 @@ KVTError KVTManagerWrapper2PL::commit_transaction(uint64_t tx_id, std::string& e
             if (it != table->data.end()) {
                 assert(it->second.metadata == static_cast<int32_t>(tx_id));
                 it->second.metadata = 0;  // Release the lock
-                read_lock_releases++;
             }
         }
     }
-    
-    std::cout << "Released " << read_lock_releases << " read-only locks" << std::endl;
-    std::cout << "==== DEBUG 2PL TX" << tx_id << " COMMIT END ====" << std::endl;
     
     transactions.erase(tx_id);
     return KVTError::SUCCESS;
@@ -763,20 +733,6 @@ KVTError KVTManagerWrapper2PL::scan(uint64_t tx_id, const std::string& table_nam
     
     results.clear();
     
-    // DEBUG
-    static int scan_count = 0;
-    if (scan_count++ < 5) {
-        std::cout << "DEBUG SCAN TX" << tx_id << " range [" << key_start << "-" << key_end 
-                    << "] limit=" << num_item_limit << std::endl;
-        int count = 0;
-        for (auto it = table->data.lower_bound(key_start);
-                it != table->data.end() && it->first <= key_end && count++ < 10;
-                ++it) {
-            std::cout << "  Key=" << it->first << " metadata=" << it->second.metadata 
-                        << " value=" << it->second.data << std::endl;
-        }
-    }
-    
     // One-shot scan
     if (tx_id == 0) {
         for (auto it = table->data.lower_bound(key_start); 
@@ -865,21 +821,6 @@ KVTError KVTManagerWrapperOCC::commit_transaction(uint64_t tx_id, std::string& e
         return KVTError::TRANSACTION_NOT_FOUND;
     }
     
-    // DEBUG: Show what we're committing
-    std::cout << "\n==== DEBUG OCC TX" << tx_id << " COMMIT START ====" << std::endl;
-    std::cout << "Write set size: " << tx->write_set.size() << std::endl;
-    std::cout << "Delete set size: " << tx->delete_set.size() << std::endl;
-    std::cout << "Read set size: " << tx->read_set.size() << std::endl;
-    
-    // Show a sample of writes
-    int write_count = 0;
-    for (const auto& [write_key, entry] : tx->write_set) {
-        if (write_count++ < 10) {
-            auto [table_name, key] = parse_table_key(write_key);
-            std::cout << "  Write: key=" << key << " value=" << entry.data << std::endl;
-        }
-    }
-    
     //first check if the readset versions are still valid
     for (const auto& read_pair : tx->read_set) {
         auto [table_name, key] = parse_table_key(read_pair.first);
@@ -902,7 +843,6 @@ KVTError KVTManagerWrapperOCC::commit_transaction(uint64_t tx_id, std::string& e
         assert(table);
         auto itr = table->data.find(key);
         assert (itr != table->data.end());
-        std::cout << "  DEBUG: Deleting key=" << key << " old_value=" << itr->second.data << std::endl;
         table->data.erase(itr);
     }
     for (const auto& write_pair : tx->write_set) {
@@ -914,15 +854,7 @@ KVTError KVTManagerWrapperOCC::commit_transaction(uint64_t tx_id, std::string& e
         uint64_t new_version = (table->data.find(key) != table->data.end()) ? table->data[key].metadata + 1 : 1;
         table->data[key] = Entry(write_pair.second.data, static_cast<int32_t>(new_version));
         
-        // DEBUG
-        static int debug_write_count = 0;
-        if (debug_write_count++ < 20) {
-            std::cout << "  DEBUG: Writing key=" << key << " old=" << old_value 
-                        << " new=" << write_pair.second.data << " version=" << new_version << std::endl;
-        }
     }
-    
-    std::cout << "==== DEBUG OCC TX" << tx_id << " COMMIT END ====" << std::endl;
     
     transactions.erase(tx_id);
     return KVTError::SUCCESS;
