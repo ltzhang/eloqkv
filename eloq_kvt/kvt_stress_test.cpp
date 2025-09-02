@@ -219,6 +219,7 @@ public:
     }
     
     bool check_consistency(const std::string& context = "") {
+        std::cout << "Checking consistency: " << context << std::endl;
         std::string error_msg;
         uint64_t tx_id = 0;
         // Scan entire key range
@@ -359,7 +360,7 @@ public:
             range_delta_sum[range_id] = 0;
         }
         //scan the ops to get the range_delta_sum, a mutation op(set, del) will always have a get before it. 
-        for (int i = 0; i < ctx.ops().size(); i++) {
+        for (size_t i = 0; i < ctx.ops().size(); i++) {
             if (ctx.op(i).op_type == TransactionContext::Operation::OP_SET) {
                 assert (i > 0 && ctx.op(i-1).op_type == TransactionContext::Operation::OP_GET);
                 int prev_value = ctx.op(i-1).value;
