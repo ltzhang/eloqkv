@@ -88,6 +88,15 @@ KVTError kvt_rollback_transaction(uint64_t tx_id, std::string& error_msg) {
     return g_kvt_manager->rollback_transaction(tx_id, error_msg);
 }
 
+KVTError kvt_batch_execute(uint64_t tx_id, const KVTBatchOps& batch_ops, 
+                          KVTBatchResults& batch_results, std::string& error_msg) {
+    if (!g_kvt_manager) {
+        error_msg = "KVT system not initialized";
+        return KVTError::KVT_NOT_INITIALIZED;
+    }
+    return g_kvt_manager->batch_execute(tx_id, batch_ops, batch_results, error_msg);
+}
+
 
 //=============================================================================================
 

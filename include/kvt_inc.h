@@ -30,8 +30,33 @@ enum class KVTError {
     TRANSACTION_HAS_STALE_DATA,            // OCC validation failed due to concurrent modifications
     ONE_SHOT_WRITE_NOT_ALLOWED,           // Write operations require an active transaction
     ONE_SHOT_DELETE_NOT_ALLOWED,          // Delete operations require an active transaction
+    BATCH_NOT_FULLY_SUCCESS,                       // Some operations succeeded, some failed
     UNKNOWN_ERROR                          // Unknown or unexpected error
 };
+
+enum KVT_OP //for batch operations
+{
+    OP_UNKNOWN,
+    OP_GET,
+    OP_SET,
+    OP_DEL,
+};
+
+struct KVTOp
+{
+    KVT_OP op;
+    std::string table_name;
+    std::string key;
+    std::string value;
+}; 
+struct KVTOpResult
+{
+    KVTError error;
+    std::string value; //only valide for get operation
+}; 
+
+typedef std::vector<KVTOp> KVTBatchOps;
+typedef std::vector<KVTOpResult> KVTBatchResults;
 
 /**
  * KVT (Key-Value Transaction) API
@@ -181,5 +206,20 @@ KVTError kvt_commit_transaction(uint64_t tx_id, std::string& error_msg);
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_rollback_transaction(uint64_t tx_id, std::string& error_msg);
+
+/**
+ * Execute a batch of operations within a transaction.
+ * Operations are executed sequentially. If all operations succeed, returns SUCCESS.
+ * If any operation fails, returns BATCH_NOT_FULLY_SUCCESS with error details.
+ * @param tx_id Transaction ID (0 for auto-commit/one-shot operations)
+ * @param batch_ops Vector of operations to execute
+ * @param batch_results Output parameter for results of each operation
+ * @param error_msg Output parameter for concatenated error messages with op indices
+ * @return KVTError::SUCCESS if all operations successful, KVTError::BATCH_NOT_FULLY_SUCCESS if some failed
+ */
+KVTError kvt_batch_execute(uint64_t tx_id,
+                           const KVTBatchOps& batch_ops,
+                           KVTBatchResults& batch_results,
+                           std::string& error_msg);
 
 #endif // KVT_INC_H

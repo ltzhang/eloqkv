@@ -37,8 +37,34 @@ enum class KVTError {
     TRANSACTION_HAS_STALE_DATA,            // OCC validation failed due to concurrent modifications
     ONE_SHOT_WRITE_NOT_ALLOWED,           // Write operations require an active transaction
     ONE_SHOT_DELETE_NOT_ALLOWED,          // Delete operations require an active transaction
+    BATCH_NOT_FULLY_SUCCESS,               // Some operations succeeded, some failed
     UNKNOWN_ERROR                          // Unknown or unexpected error
 };
+
+enum KVT_OPType //for batch operations
+{
+    OP_UNKNOWN,
+    OP_GET,
+    OP_SET,
+    OP_DEL,
+};
+
+struct KVTOp
+{
+    enum KVT_OPType op;
+    std::string table_name;
+    std::string key;
+    std::string value;
+}; 
+
+struct KVTOpResult
+{
+    KVTError error;
+    std::string value; //only valid for get operation
+}; 
+
+typedef std::vector<KVTOp> KVTBatchOps;
+typedef std::vector<KVTOpResult> KVTBatchResults;
 
 class KVTManagerWrapperInterface
 {
@@ -58,6 +84,57 @@ class KVTManagerWrapperInterface
         virtual KVTError scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
                   const std::string& key_end, size_t num_item_limit, 
                   std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) = 0;
+        
+        // Default batch execute implementation - executes operations individually
+        virtual KVTError batch_execute(uint64_t tx_id, const KVTBatchOps& batch_ops, 
+                  KVTBatchResults& batch_results, std::string& error_msg) {
+            batch_results.clear();
+            batch_results.reserve(batch_ops.size());
+            
+            bool all_success = true;
+            std::string concatenated_errors;
+            
+            for (size_t i = 0; i < batch_ops.size(); ++i) {
+                const KVTOp& op = batch_ops[i];
+                KVTOpResult result;
+                std::string op_error;
+                
+                switch (op.op) {
+                    case OP_GET:
+                        result.error = get(tx_id, op.table_name, op.key, result.value, op_error);
+                        break;
+                    case OP_SET:
+                        result.error = set(tx_id, op.table_name, op.key, op.value, op_error);
+                        break;
+                    case OP_DEL:
+                        result.error = del(tx_id, op.table_name, op.key, op_error);
+                        break;
+                    default:
+                        result.error = KVTError::UNKNOWN_ERROR;
+                        op_error = "Unknown operation type";
+                        break;
+                }
+                
+                if (result.error != KVTError::SUCCESS) {
+                    all_success = false;
+                    if (!op_error.empty()) {
+                        if (!concatenated_errors.empty()) {
+                            concatenated_errors += "; ";
+                        }
+                        concatenated_errors += "op[" + std::to_string(i) + "]: " + op_error;
+                    }
+                }
+                
+                batch_results.push_back(result);
+            }
+            
+            if (all_success) {
+                return KVTError::SUCCESS;
+            } else {
+                error_msg = concatenated_errors;
+                return KVTError::BATCH_NOT_FULLY_SUCCESS;
+            }
+        }
 };
 
 class KVTManagerWrapperNoCC : public KVTManagerWrapperInterface
