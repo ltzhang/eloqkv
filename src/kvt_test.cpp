@@ -88,6 +88,14 @@ void KVTManager::runSingleThreadedStressTest() {
     const int duration_seconds = 30; // 30 seconds
     const int ops_per_transaction = 5;
     
+    // Get table ID for performance testing
+    std::string error_msg;
+    uint64_t table_id;
+    if (!doGetTableId("perf_table_hash", table_id, error_msg)) {
+        std::cerr << "Failed to get table ID: " << error_msg << std::endl;
+        return;
+    }
+    
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> key_dist(1, 10000);
@@ -124,7 +132,7 @@ void KVTManager::runSingleThreadedStressTest() {
             // Alternate between SET and GET operations
             if (i % 2 == 0) {
                 // SET operation
-                if (doSet(tx_id, "perf_table_hash", key, value, error_msg)) {
+                if (doSet(tx_id, table_id, key, value, error_msg)) {
                     metrics.successful_operations++;
                 } else {
                     metrics.failed_operations++;
@@ -134,7 +142,7 @@ void KVTManager::runSingleThreadedStressTest() {
             } else {
                 // GET operation
                 std::string retrieved_value;
-                if (doGet(tx_id, "perf_table_hash", key, retrieved_value, error_msg)) {
+                if (doGet(tx_id, table_id, key, retrieved_value, error_msg)) {
                     metrics.successful_operations++;
                 } else {
                     metrics.failed_operations++;
@@ -179,6 +187,14 @@ void KVTManager::runMultiThreadedStressTest() {
     const int duration_seconds = 30; // 30 seconds
     const int ops_per_transaction = 5;
     
+    // Get table ID for performance testing
+    std::string error_msg;
+    uint64_t table_id;
+    if (!doGetTableId("perf_table_hash", table_id, error_msg)) {
+        std::cerr << "Failed to get table ID: " << error_msg << std::endl;
+        return;
+    }
+    
     std::cout << "Running with " << num_threads << " threads for " << duration_seconds 
               << " seconds with " << ops_per_transaction << " operations per transaction..." << std::endl;
     
@@ -190,7 +206,7 @@ void KVTManager::runMultiThreadedStressTest() {
     
     // Launch worker threads
     for (int thread_id = 0; thread_id < num_threads; thread_id++) {
-        threads.emplace_back([this, thread_id, &global_metrics, &stop_flag, ops_per_transaction]() {
+        threads.emplace_back([this, thread_id, &global_metrics, &stop_flag, ops_per_transaction, table_id]() {
             std::random_device rd;
             std::mt19937 gen(rd() + thread_id); // Seed with thread_id for different sequences
             std::uniform_int_distribution<> key_dist(1, 10000);
@@ -223,7 +239,7 @@ void KVTManager::runMultiThreadedStressTest() {
                     // Alternate between SET and GET operations
                     if (i % 2 == 0) {
                         // SET operation
-                        if (doSet(tx_id, "perf_table_hash", key, value, error_msg)) {
+                        if (doSet(tx_id, table_id, key, value, error_msg)) {
                             local_metrics.successful_operations++;
                         } else {
                             local_metrics.failed_operations++;
@@ -233,7 +249,7 @@ void KVTManager::runMultiThreadedStressTest() {
                     } else {
                         // GET operation
                         std::string retrieved_value;
-                        if (doGet(tx_id, "perf_table_hash", key, retrieved_value, error_msg)) {
+                        if (doGet(tx_id, table_id, key, retrieved_value, error_msg)) {
                             local_metrics.successful_operations++;
                         } else {
                             local_metrics.failed_operations++;
@@ -316,6 +332,14 @@ void KVTManager::runThroughputBenchmark() {
     const int test_duration = 30; // 30 seconds
     const std::vector<int> thread_counts = {1, 2, 4, 8, 16};
     
+    // Get table ID for benchmark testing
+    std::string error_msg;
+    uint64_t table_id;
+    if (!doGetTableId("benchmark_hash", table_id, error_msg)) {
+        std::cerr << "Failed to get table ID: " << error_msg << std::endl;
+        return;
+    }
+    
     for (int num_threads : thread_counts) {
         PerfMetrics metrics;
         std::vector<std::thread> threads;
@@ -325,7 +349,7 @@ void KVTManager::runThroughputBenchmark() {
         
         // Launch threads
         for (int i = 0; i < num_threads; i++) {
-            threads.emplace_back([this, i, &metrics, &stop_flag]() {
+            threads.emplace_back([this, i, &metrics, &stop_flag, table_id]() {
                 std::random_device rd;
                 std::mt19937 gen(rd() + i);
                 std::uniform_int_distribution<> key_dist(1, 1000);
@@ -342,7 +366,7 @@ void KVTManager::runThroughputBenchmark() {
                     std::string key = "bench_key_" + std::to_string(key_dist(gen));
                     std::string value = "bench_value_" + std::to_string(value_dist(gen));
                     
-                    if (doSet(tx_id, "benchmark_hash", key, value, error_msg)) {
+                    if (doSet(tx_id, table_id, key, value, error_msg)) {
                         metrics.total_operations++;
                         if (doCommitTx(tx_id, error_msg)) {
                             metrics.successful_transactions++;
@@ -381,6 +405,14 @@ void KVTManager::runLatencyBenchmark() {
     std::vector<double> latencies;
     latencies.reserve(num_samples);
     
+    // Get table ID for latency testing
+    std::string error_msg;
+    uint64_t table_id;
+    if (!doGetTableId("benchmark_hash", table_id, error_msg)) {
+        std::cerr << "Failed to get table ID: " << error_msg << std::endl;
+        return;
+    }
+    
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> key_dist(1, 1000);
@@ -396,7 +428,7 @@ void KVTManager::runLatencyBenchmark() {
         std::string key = "latency_key_" + std::to_string(key_dist(gen));
         std::string value = "latency_value_" + std::to_string(value_dist(gen));
         
-        doSet(tx_id, "benchmark_hash", key, value, error_msg);
+        doSet(tx_id, table_id, key, value, error_msg);
         doCommitTx(tx_id, error_msg);
         
         auto end = std::chrono::high_resolution_clock::now();
@@ -426,6 +458,14 @@ void KVTManager::runConcurrencyBenchmark() {
     const int transactions_per_thread = 100;
     const int ops_per_transaction = 10;
     
+    // Get table ID for concurrency testing
+    std::string error_msg;
+    uint64_t table_id;
+    if (!doGetTableId("benchmark_hash", table_id, error_msg)) {
+        std::cerr << "Failed to get table ID: " << error_msg << std::endl;
+        return;
+    }
+    
     PerfMetrics metrics;
     std::vector<std::thread> threads;
     
@@ -433,7 +473,7 @@ void KVTManager::runConcurrencyBenchmark() {
     
     // Launch threads that work on overlapping key ranges to test concurrency
     for (int thread_id = 0; thread_id < num_threads; thread_id++) {
-        threads.emplace_back([this, thread_id, &metrics, transactions_per_thread, ops_per_transaction]() {
+        threads.emplace_back([this, thread_id, &metrics, transactions_per_thread, ops_per_transaction, table_id]() {
             std::random_device rd;
             std::mt19937 gen(rd() + thread_id);
             std::uniform_int_distribution<> key_dist(1, 100); // Overlapping key space
@@ -451,7 +491,7 @@ void KVTManager::runConcurrencyBenchmark() {
                     std::string key = "conc_key_" + std::to_string(key_dist(gen));
                     std::string value = "conc_val_t" + std::to_string(thread_id) + "_" + std::to_string(value_dist(gen));
                     
-                    if (!doSet(tx_id, "benchmark_hash", key, value, error_msg)) {
+                    if (!doSet(tx_id, table_id, key, value, error_msg)) {
                         success = false;
                         break;
                     }
@@ -516,20 +556,20 @@ void KVTManager::runComprehensiveTest() {
     
     // Test 3: One-shot operations (tx_id = 0)
     std::cout << "Test 3: One-shot operations..." << std::endl << std::endl;
-    bool success = doSet(0, "test_table_hash", "oneshot_key", "oneshot_value", error_msg);
+    bool success = doSet(0, table1_id, "oneshot_key", "oneshot_value", error_msg);
     assert(success);
     std::cout << "✓ One-shot SET operation succeeded" << std::endl << std::endl;
     
     std::string value;
-    success = doGet(0, "test_table_hash", "oneshot_key", value, error_msg);
+    success = doGet(0, table1_id, "oneshot_key", value, error_msg);
     assert(success);
     std::cout << "✓ One-shot GET operation succeeded, value: '" << value << "'" << std::endl;
 
-    success = doSet(0, "test_table_range", "oneshot_key", "oneshot_value", error_msg);
+    success = doSet(0, table2_id, "oneshot_key", "oneshot_value", error_msg);
     assert(success);
     std::cout << "✓ One-shot SET operation succeeded" << std::endl << std::endl;
     
-    success = doGet(0, "test_table_range", "oneshot_key", value, error_msg);
+    success = doGet(0, table2_id, "oneshot_key", value, error_msg);
     assert(success);
     std::cout << "✓ One-shot GET operation succeeded, value: '" << value << "'" << std::endl;
     
@@ -537,29 +577,29 @@ void KVTManager::runComprehensiveTest() {
     std::cout << "Test 4: Transactional operations..." << std::endl << std::endl;
     
     // Set some values in transaction 1
-    // success = doSet(tx1, "test_table_hash", "key1", "value1_tx1", error_msg);
+    // success = doSet(tx1, table1_id, "key1", "value1_tx1", error_msg);
     // assert(success);
     // std::cout << "✓ SET key1=value1_tx1 in TX1" << std::endl << std::endl;
     
-    success = doSet(tx1, "test_table_hash", "key2", "value2_tx1", error_msg);
+    success = doSet(tx1, table1_id, "key2", "value2_tx1", error_msg);
     assert(success);
     std::cout << "✓ SET key2=value2_tx1 in TX1" << std::endl << std::endl;
     
     // Set different values in transaction 2
-    success = doSet(tx2, "test_table_hash", "key1", "value1_tx2", error_msg);
+    success = doSet(tx2, table1_id, "key1", "value1_tx2", error_msg);
     assert(success);
     std::cout << "✓ SET key1=value1_tx2 in TX2" << std::endl << std::endl;
     
-    success = doSet(tx2, "test_table_range", "range_key", "range_value", error_msg);
+    success = doSet(tx2, table2_id, "range_key", "range_value", error_msg);
     assert(success);
     std::cout << "✓ SET range_key=range_value in TX2 on range table" << std::endl << std::endl;
     
     // Test reading within transactions
-    // success = doGet(tx1, "test_table_hash", "key1", value, error_msg);
+    // success = doGet(tx1, table1_id, "key1", value, error_msg);
     // assert(success);
     // std::cout << "✓ GET key1 in TX1, value: '" << value << "'" << std::endl;
     
-    success = doGet(tx2, "test_table_hash", "key1", value, error_msg);
+    success = doGet(tx2, table1_id, "key1", value, error_msg);
     assert(success);
     std::cout << "✓ GET key1 in TX2, value: '" << value << "'" << std::endl;
 
@@ -567,23 +607,23 @@ void KVTManager::runComprehensiveTest() {
     std::cout << "Test 5: Scan operations..." << std::endl << std::endl;
     std::vector<std::pair<std::string, std::string>> scan_results;
     
-    success = doScan(0, "test_table_range", "a", "z", 5, scan_results, error_msg);
+    success = doScan(0, table2_id, "a", "z", 5, scan_results, error_msg);
     assert(success);
     std::cout << "✓ One-shot SCAN on range table returned " << scan_results.size() << " results" << std::endl;
 
-    doSet(0, "test_table_range", "range_key_2", "range_value", error_msg);
+    doSet(0, table2_id, "range_key_2", "range_value", error_msg);
     assert(success);
     std::cout << "✓ SET range_key=range_value in one-shot on range table" << std::endl << std::endl;
 
-    success = doScan(0, "test_table_range", "a", "z", 5, scan_results, error_msg);
+    success = doScan(0, table2_id, "a", "z", 5, scan_results, error_msg);
     assert(success);
     std::cout << "✓ One-shot SCAN on range table returned " << scan_results.size() << " results" << std::endl;
     
     // Test 6: Error conditions
     std::cout << "Test 6: Error conditions..." << std::endl << std::endl;
     
-    // Try to operate on non-existent table
-    success = doSet(tx1, "non_existent_table", "key", "value", error_msg);
+    // Try to operate on non-existent table (use invalid table ID)
+    success = doSet(tx1, 99999, "key", "value", error_msg);
     assert(!success);
     std::cout << "✓ Operation on non-existent table correctly failed: " << error_msg << std::endl;
     
@@ -602,11 +642,11 @@ void KVTManager::runComprehensiveTest() {
     
     // First, verify what we can read from each transaction before commit/rollback
     std::cout << "Before commit/rollback:" << std::endl;
-    success = doGet(tx1, "test_table_hash", "key1", value, error_msg);
+    success = doGet(tx1, table1_id, "key1", value, error_msg);
     std::cout << "TX1 sees key1: '" << value << "'" << std::endl;
-    success = doGet(tx2, "test_table_hash", "key1", value, error_msg);
+    success = doGet(tx2, table1_id, "key1", value, error_msg);
     std::cout << "TX2 sees key1: '" << value << "'" << std::endl;
-    success = doGet(0, "test_table_hash", "key1", value, error_msg);
+    success = doGet(0, table1_id, "key1", value, error_msg);
     std::cout << "One-shot read sees key1: '" << value << "' (should be empty or oneshot_value)" << std::endl;
     
     // Commit transaction 1 - its changes should become persistent
@@ -615,13 +655,13 @@ void KVTManager::runComprehensiveTest() {
     std::cout << "✓ Committed TX1: " << tx1 << std::endl;
     
     // After TX1 commit, verify persistence
-    success = doGet(0, "test_table_hash", "key1", value, error_msg);
+    success = doGet(0, table1_id, "key1", value, error_msg);
     std::cout << "After TX1 commit, one-shot read sees key1: '" << value << "' (should be value1_tx1)" << std::endl;
-    success = doGet(0, "test_table_hash", "key2", value, error_msg);
+    success = doGet(0, table1_id, "key2", value, error_msg);
     std::cout << "After TX1 commit, one-shot read sees key2: '" << value << "' (should be value2_tx1)" << std::endl;
     
     // TX2 should still see its own uncommitted version
-    success = doGet(tx2, "test_table_hash", "key1", value, error_msg);
+    success = doGet(tx2, table1_id, "key1", value, error_msg);
     std::cout << "TX2 still sees its version of key1: '" << value << "'" << std::endl;
     
     // Rollback transaction 2 - its changes should be discarded
@@ -630,17 +670,17 @@ void KVTManager::runComprehensiveTest() {
     std::cout << "✓ Rolled back TX2: " << tx2 << std::endl;
     
     // After TX2 rollback, verify TX1's committed values are still there
-    success = doGet(0, "test_table_hash", "key1", value, error_msg);
+    success = doGet(0, table1_id, "key1", value, error_msg);
     std::cout << "After TX2 rollback, one-shot read sees key1: '" << value << "' (should still be value1_tx1)" << std::endl;
-    // success = doGet(0, "test_table_range", "range_key", value, error_msg);
+    // success = doGet(0, table2_id, "range_key", value, error_msg);
     // std::cout << "After TX2 rollback, range_key should not exist: '" << value << "' (should be empty)" << std::endl;
     
     // Try to use committed/rolled back transactions (should fail)
-    success = doSet(tx1, "test_table_hash", "key3", "value3", error_msg);
+    success = doSet(tx1, table1_id, "key3", "value3", error_msg);
     assert(!success);
     std::cout << "✓ Using committed transaction correctly failed: " << error_msg << std::endl;
     
-    success = doSet(tx2, "test_table_hash", "key4", "value4", error_msg);
+    success = doSet(tx2, table1_id, "key4", "value4", error_msg);
     assert(!success);
     std::cout << "✓ Using rolled back transaction correctly failed: " << error_msg << std::endl;
     
@@ -654,14 +694,14 @@ void KVTManager::runComprehensiveTest() {
     std::cout << "✓ Started three new transactions: " << tx3 << ", " << tx4 << ", " << tx5 << std::endl;
     
     // Perform operations across multiple tables and transactions
-    doSet(tx3, "test_table_hash", "complex_key1", "complex_value1", error_msg);
-    //doSet(tx3, "test_table_range", "complex_key2", "complex_value2", error_msg);
-    doSet(tx4, "test_table_hash", "complex_key3", "complex_value3", error_msg);
-    doSet(tx5, "test_table_range", "complex_key4", "complex_value4", error_msg);
+    doSet(tx3, table1_id, "complex_key1", "complex_value1", error_msg);
+    //doSet(tx3, table2_id, "complex_key2", "complex_value2", error_msg);
+    doSet(tx4, table1_id, "complex_key3", "complex_value3", error_msg);
+    doSet(tx5, table2_id, "complex_key4", "complex_value4", error_msg);
     
     // Scan operations within transactions
-    //doScan(tx3, "test_table_hash", "complex", "complex_z", 10, scan_results, error_msg);
-    //doScan(tx4, "test_table_range", "a", "z", 20, scan_results, error_msg);
+    //doScan(tx3, table1_id, "complex", "complex_z", 10, scan_results, error_msg);
+    //doScan(tx4, table2_id, "a", "z", 20, scan_results, error_msg);
     
     // Commit some, rollback others
     doCommitTx(tx3, error_msg);
@@ -681,7 +721,7 @@ void KVTManager::runComprehensiveTest() {
         std::string key = "stress_key_" + std::to_string(i);
         std::string value = "stress_value_" + std::to_string(i * 10);
         
-        bool set_success = doSet(stress_tx, "test_table_hash", key, value, error_msg);
+        bool set_success = doSet(stress_tx, table1_id, key, value, error_msg);
         assert(set_success);
         
         if (i % 10 == 0) {
@@ -693,7 +733,7 @@ void KVTManager::runComprehensiveTest() {
     for (int i = 0; i < 100; i += 10) {
         std::string key = "stress_key_" + std::to_string(i);
         std::string read_value;
-        bool get_success = doGet(stress_tx, "test_table_hash", key, read_value, error_msg);
+        bool get_success = doGet(stress_tx, table1_id, key, read_value, error_msg);
         assert(get_success);
     }
     
@@ -713,23 +753,23 @@ void KVTManager::runComprehensiveTest() {
     std::cout << "✓ Rollback TX ID 0 correctly failed: " << error_msg << std::endl;
     
     // Empty key operations
-    success = doSet(0, "test_table_hash", "", "empty_key_value", error_msg);
+    success = doSet(0, table1_id, "", "empty_key_value", error_msg);
     assert(success);  // Empty keys should be allowed
     std::cout << "✓ SET with empty key succeeded" << std::endl << std::endl;
     
-    success = doGet(0, "test_table_hash", "", value, error_msg);
+    success = doGet(0, table1_id, "", value, error_msg);
     assert(success);
     std::cout << "✓ GET with empty key succeeded, value: '" << value << "'" << std::endl;
     
     // Empty value operations
-    success = doSet(0, "test_table_hash", "empty_value_key", "", error_msg);
+    success = doSet(0, table1_id, "empty_value_key", "", error_msg);
     assert(success);
     std::cout << "✓ SET with empty value succeeded" << std::endl << std::endl;
     
     // Very long key and value
     std::string long_key(1000, 'k');
     std::string long_value(10000, 'v');
-    success = doSet(0, "test_table_hash", long_key, long_value, error_msg);
+    success = doSet(0, table1_id, long_key, long_value, error_msg);
     assert(success);
     std::cout << "✓ SET with very long key (" << long_key.length() << " chars) and value (" 
               << long_value.length() << " chars) succeeded" << std::endl;
@@ -738,7 +778,7 @@ void KVTManager::runComprehensiveTest() {
     std::cout << "Test 11: Advanced ACID behavior..." << std::endl << std::endl;
     
     // Create a baseline committed value
-    success = doSet(0, "test_table_hash", "shared_key", "baseline_value", error_msg);
+    success = doSet(0, table1_id, "shared_key", "baseline_value", error_msg);
     assert(success);
     std::cout << "✓ Set baseline value for shared_key" << std::endl;
     
@@ -747,19 +787,19 @@ void KVTManager::runComprehensiveTest() {
     uint64_t tx_b = doStartTx(error_msg);
     
     // Both transactions modify the same key
-    success = doSet(tx_a, "test_table_hash", "shared_key", "value_from_tx_a", error_msg);
+    success = doSet(tx_a, table1_id, "shared_key", "value_from_tx_a", error_msg);
     assert(success);
-    success = doSet(tx_b, "test_table_hash", "shared_key", "value_from_tx_b", error_msg);
+    success = doSet(tx_b, table1_id, "shared_key", "value_from_tx_b", error_msg);
     assert(success);
     
     // Each transaction should see its own version
-    success = doGet(tx_a, "test_table_hash", "shared_key", value, error_msg);
+    success = doGet(tx_a, table1_id, "shared_key", value, error_msg);
     std::cout << "TX_A sees shared_key: '" << value << "' (should be value_from_tx_a)" << std::endl;
-    success = doGet(tx_b, "test_table_hash", "shared_key", value, error_msg);
+    success = doGet(tx_b, table1_id, "shared_key", value, error_msg);
     std::cout << "TX_B sees shared_key: '" << value << "' (should be value_from_tx_b)" << std::endl;
     
     // One-shot reads should see the baseline
-    success = doGet(0, "test_table_hash", "shared_key", value, error_msg);
+    success = doGet(0, table1_id, "shared_key", value, error_msg);
     std::cout << "One-shot sees shared_key: '" << value << "' (should be baseline_value)" << std::endl;
     
     // Commit TX_A first
@@ -768,11 +808,11 @@ void KVTManager::runComprehensiveTest() {
     std::cout << "✓ Committed TX_A" << std::endl;
     
     // Now one-shot should see TX_A's value
-    success = doGet(0, "test_table_hash", "shared_key", value, error_msg);
+    success = doGet(0, table1_id, "shared_key", value, error_msg);
     std::cout << "After TX_A commit, one-shot sees: '" << value << "' (should be value_from_tx_a)" << std::endl;
     
     // TX_B should still see its own uncommitted version
-    success = doGet(tx_b, "test_table_hash", "shared_key", value, error_msg);
+    success = doGet(tx_b, table1_id, "shared_key", value, error_msg);
     std::cout << "TX_B still sees its version: '" << value << "' (should be value_from_tx_b)" << std::endl;
     
     // Now rollback TX_B
@@ -781,7 +821,7 @@ void KVTManager::runComprehensiveTest() {
     std::cout << "✓ Rolled back TX_B" << std::endl;
     
     // Final state should be TX_A's committed value
-    success = doGet(0, "test_table_hash", "shared_key", value, error_msg);
+    success = doGet(0, table1_id, "shared_key", value, error_msg);
     std::cout << "Final state of shared_key: '" << value << "' (should be value_from_tx_a)" << std::endl;
     
     // Test 12: Scan with transaction isolation
@@ -793,13 +833,13 @@ void KVTManager::runComprehensiveTest() {
     for (int i = 1; i <= 5; i++) {
         std::string key = "scan_key_" + std::to_string(i);
         std::string value = "scan_value_" + std::to_string(i);
-        success = doSet(scan_tx, "test_table_hash", key, value, error_msg);
+        success = doSet(scan_tx, table1_id, key, value, error_msg);
         assert(success);
     }
     
     // Scan within transaction should see these keys
     std::vector<std::pair<std::string, std::string>> tx_scan_results;
-    // success = doScan(scan_tx, "test_table_hash", "scan_key_", "scan_key_z", 10, tx_scan_results, error_msg);
+    // success = doScan(scan_tx, table1_id, "scan_key_", "scan_key_z", 10, tx_scan_results, error_msg);
     // assert(success);
     std::cout << "✓ Transaction scan found " << tx_scan_results.size() << " items" << std::endl;
     for (const auto& pair : tx_scan_results) {
@@ -808,7 +848,7 @@ void KVTManager::runComprehensiveTest() {
     
     // One-shot scan should not see these keys yet
     std::vector<std::pair<std::string, std::string>> oneshot_scan_results;
-    // success = doScan(0, "test_table_hash", "scan_key_", "scan_key_z", 10, oneshot_scan_results, error_msg);
+    // success = doScan(0, table1_id, "scan_key_", "scan_key_z", 10, oneshot_scan_results, error_msg);
     // assert(success);
     std::cout << "✓ One-shot scan found " << oneshot_scan_results.size() << " items (should be 0)" << std::endl;
     
@@ -818,7 +858,7 @@ void KVTManager::runComprehensiveTest() {
     std::cout << "✓ Committed scan transaction" << std::endl;
     
     // Now one-shot scan should see the keys
-    // success = doScan(0, "test_table_hash", "scan_key_", "scan_key_z", 10, oneshot_scan_results, error_msg);
+    // success = doScan(0, table1_id, "scan_key_", "scan_key_z", 10, oneshot_scan_results, error_msg);
     // assert(success);
     std::cout << "✓ Post-commit one-shot scan found " << oneshot_scan_results.size() << " items" << std::endl;
     for (const auto& pair : oneshot_scan_results) {
