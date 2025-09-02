@@ -128,6 +128,7 @@ private:
     
     // Test methods
     void runComprehensiveTest();
+    void runComprehensiveStressTest();
     
     // Stress test and performance benchmark methods
     void runStressTest();

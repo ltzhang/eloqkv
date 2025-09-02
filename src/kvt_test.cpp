@@ -10,6 +10,11 @@
 #include <algorithm>
 #include <numeric>
 
+// Include the stress test by renaming its main function
+#define main stress_test_main
+#include "../eloq_kvt/kvt_stress_test.cpp"
+#undef main
+
 namespace EloqKV {
 
 // Performance metrics tracking
@@ -869,5 +874,13 @@ void KVTManager::runComprehensiveTest() {
     exit(1);
 }
 
+// Add a new function to run the comprehensive stress test
+void KVTManager::runComprehensiveStressTest() {
+    std::cout << "\n=== Running Comprehensive Stress Test (kvt_stress_test2) ===" << std::endl;
+    
+    // Call the stress test main function with proper arguments
+    const char* argv[] = {"kvt_stress_test", nullptr};
+    stress_test_main(1, const_cast<char**>(argv));
+}
 
 } // namespace EloqKV

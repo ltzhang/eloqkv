@@ -1,23 +1,114 @@
-We write a comprehensive test for kvt_mem, including the KVTManagerWrapperSimple and KVTManagerWrapperOCC (i.e. assume we can exchange the class, since the interface are the same). The idea is to randomly start transactions that involve a set of keys and values. We have a few consistency gurantee for the keys and values for the database. 
+# KVT Memory Implementation - Development Guide
 
-We assume keys are in a given range, e.g. from string 0 to 10000 (turn them into string), and values are also from 0 to 1000 (also make them string). The transactions can be mixed: single shot, aborted, committed, and so on. A transaction can include upto 10 operations, but we have some constraints. The idea is, we can we make sure that for all transactions, the modified values' in a hundred range sum can be evenly divided by 100. i.e. the invarant is, For all keys in 0 to 100, the sum of the values must be evenly dividable by 100 (say, can be 9900 but not 9911). Same for keys from 100 to 200, and so on, up to 9900 to 10000. 
+## Overview
+KVT (Key-Value Transaction) is a self-contained transactional key-value store implementation with full ACID properties. The project provides multiple concurrency control mechanisms and comprehensive testing framework.
 
-During operation, we run many transactions, each involve up to 20 operations. We first check the single threaded non interleaved case (i.e. only a single transaction on going), then we run single-thread but interleaved case. At the same time, upto say 10 transactions are on-going, each perform random operations, when one commit/abort, we remove it and add another one. Finally, we can run multi-theaded tests. Within a transaction, we do need to make sure that the return values are checked. Some errors (return false) is expected (for example, key does not exist), while others will force abort (say, stale value, which already aborted due to commit failure). 
+## Current Implementation Status
 
-The transactions must obey certain constraints. In a transaction, if we delete a key (say 112) with value 50, we need to modify two keys within the same 100 range, say 123 and 155, so that the two keys can have value 23 and 127, so that the total (127 + 23 - 50) is 100. We can either add those keys if they do not exist, or we can change their value by the desired amount. Similarly, if we add a new key with value 700, we can also add one with 200 in the same 100 range (say, first is key 2322 and the other is 2345), but can not modify key 2366 and add its value by 23. By doing such transactions, the modified value total within each 100 range is evenly divided by 100. We can make some wrong transactions, e.g. the modified values are not evenly dividable, say, total 123 in the 300 to 400 key range, but then we have to abort the transaction. All transactions that violate the consistency is aborted and transactions obeying the constraints can be either committed or aborted. We mix commit and abort/rollback with a fixed ratio. A transaction may contain mutliple 100 ranges, as long as each 100 range obey the constraint. 
+### Core Components
+- **kvt_inc.h**: Public API interface - provides a clean C-style API for all KVT operations
+- **kvt_mem.h/cpp**: Internal implementation with multiple concurrency control mechanisms:
+  - `KVTMemManagerNoCC`: No concurrency control (baseline)
+  - `KVTMemManagerSimple`: Simple locking with single active transaction
+  - `KVTMemManager2PL`: Two-phase locking protocol
+  - `KVTMemManagerOCC`: Optimistic concurrency control with version checking
 
-At the start, we first populate the database (by, say add around 2000 keys out of the 10000), but make sure that the added key values obey the constraint. We do this by populate range by range, each range satisfy the constraint. After populating, we check consistency of the DB, if success, we perform tests. As stress test goes on, we do consistency check once in a while (say, every 100 transactions) by perform full scan of the DB and check consistent range onedo a range scan of a range that should obey constraint (say, from 200 to 400). Report error when we detect one. The range scan do not need to wait for every transaction to commit, as our transactional system suppose to gurantee isolation. 
+### Test Infrastructure
+- **kvt_sample.cpp**: Demonstrates API usage with basic operations and transactions
+- **kvt_stress_test.cpp**: Comprehensive stress testing with invariant checking
 
-Notice that key must be fixed in size, because we use string comparison in Key Value, simple to_string method will not keep keys in order. 
+## Stress Test Design
 
-In each transaction execution, we need to focus on a small set of consistent ranges (say from 1 to 4), and track operations in each range, because generate random values to try to fit satisfy constraint is impossible. The steps should be:
-1) Decide a few operations in a transaction (say around 20), predetermine whether we want to abort or not. 
-2) decide a few (1 ~ 4) ranges 
-3) When execution, randomly choose a range, then randomly choose a key, then randomly choose an operation to run. 
-4) After we finish a bunch of operations, if we predetermine to commit the transaction, we finish this transaction by fixing the operations in each range to obey the constraint. We calculate what value should we use to add/delete from the key so that the constraint can be met. 
-5) commit or abort as we decided before. 
+The stress test validates transactional consistency using a constraint-based approach:
 
-Values in the store (i.e when use kvt_get kvt_set) and so on are already being tracked correctly, so when you set a key with a value, next time you get from the key you will get the new value even before you commit. Keep this in mind, as delete will make you not able to read the old value (though the store keeps isolation so other transactions will not see the new values before your commit).
+### Key Concepts
+- **Key Range**: 0-9999 (fixed-width string format for proper ordering)
+- **Value Range**: 0-999 (string format)
+- **Consistency Ranges**: Keys grouped into 100-key ranges (0-99, 100-199, etc.)
+- **Invariant**: Sum of values in each 100-key range must be divisible by 100
 
-For interleaved test, we essentially run multiple single transactions at the same time, keeping each one's context (the context is as described above). Every time, choose a transaction to run one operation, update the transaction's context and continue. After commit/abort, we remove the transaction context, and randomly chose to start a transaction or not. You need to take care to avoid constant number of on-going transactions or transactions always start immediate after another one aborts or commits. 
+### Transaction Constraints
+Each transaction must maintain the invariant for all modified ranges:
+- When deleting a key, must adjust other keys in the same range to maintain sum divisibility
+- When adding keys, must ensure the total change is divisible by 100
+- Transactions violating constraints are intentionally aborted
+
+### Test Modes
+1. **Single Non-Interleaved**: Sequential transaction execution
+2. **Single Interleaved**: Multiple concurrent transactions, single-threaded
+3. **Multi-Threaded**: True concurrent execution with multiple threads
+
+### Test Process
+1. **Initialization**: Populate ~2000 keys ensuring initial consistency
+2. **Transaction Generation**: 
+   - 1-20 operations per transaction
+   - 1-4 consistency ranges per transaction
+   - Predetermined commit/abort decision (70% commit ratio)
+3. **Execution**: Random operations with constraint tracking
+4. **Validation**: Periodic consistency checks via full or range scans
+5. **Error Detection**: Immediate test termination on constraint violation
+
+## Build System
+
+The Makefile supports two build configurations:
+
+### Memory-Only Version (Standalone)
+```bash
+make mem              # Build memory-only version
+./kvt_sample_mem      # Run sample program
+./kvt_stress_test_mem # Run stress test
+```
+
+### ELOQ Version (Integrated with EloqKV)
+```bash
+make eloq             # Build with EloqKV integration
+./kvt_sample_eloq     # Run sample program  
+./kvt_stress_test_eloq # Run stress test
+```
+
+## Implementation Notes
+
+### Concurrency Control Mechanisms
+
+#### No Concurrency Control (NoCC)
+- Direct operations on shared data structure
+- No transaction isolation
+- Used as baseline for testing
+
+#### Simple Locking
+- Single active transaction at a time
+- Write-set and delete-set tracking
+- Immediate visibility of changes within transaction
+
+#### Two-Phase Locking (2PL)
+- Lock acquisition on first access
+- Locks held until commit/rollback
+- Prevents concurrent access to locked keys
+
+#### Optimistic Concurrency Control (OCC)
+- Version tracking for all entries
+- Validation at commit time
+- Aborts on version conflicts
+
+### Key Design Decisions
+
+1. **Fixed-Width Keys**: Ensures proper string ordering for range operations
+2. **Table-Key Encoding**: 8-byte table ID prefix for multi-table support
+3. **Metadata Field**: Dual purpose - lock holder (2PL) or version (OCC)
+4. **Batch Operations**: Default implementation with per-operation execution
+
+## Testing Guidelines
+
+When running stress tests:
+- Start with single non-interleaved mode for baseline
+- Progress to interleaved mode to test isolation
+- Use multi-threaded mode for concurrency validation
+- Monitor for any constraint violations (test will exit on error)
+- Consistency checks run every 100 transactions
+
+## Future Enhancements
+- Integration with EloqKV's tx_service for distributed transactions
+- Performance optimization for batch operations
+- Additional concurrency control mechanisms (MVCC)
+- Extended API for advanced transaction features 
 
