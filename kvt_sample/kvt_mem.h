@@ -12,11 +12,6 @@
 #include <iostream>
 #include <algorithm>
 
-// Forward declarations
-class Table;
-class Transaction;
-class Value;
-
 /**
  * KVT Error Codes
  * 
@@ -118,10 +113,7 @@ class KVTManagerWrapperInterface
                 if (result.error != KVTError::SUCCESS) {
                     all_success = false;
                     if (!op_error.empty()) {
-                        if (!concatenated_errors.empty()) {
-                            concatenated_errors += "; ";
-                        }
-                        concatenated_errors += "op[" + std::to_string(i) + "]: " + op_error;
+                        concatenated_errors += "op[" + std::to_string(i) + "]: " + op_error + "; ";
                     }
                 }
                 
@@ -135,6 +127,7 @@ class KVTManagerWrapperInterface
                 return KVTError::BATCH_NOT_FULLY_SUCCESS;
             }
         }
+    
 };
 
 class KVTManagerWrapperNoCC : public KVTManagerWrapperInterface

@@ -258,3 +258,91 @@ KVTError kvt_rollback_transaction(uint64_t tx_id, std::string& error_msg) {
         return KVTError::UNKNOWN_ERROR;
     }
 }
+
+KVTError kvt_batch_execute(uint64_t tx_id,
+                           const KVTBatchOps& batch_ops,
+                           KVTBatchResults& batch_results,
+                           std::string& error_msg) {
+    if (!g_kvt_manager) {
+        error_msg = "KVT system not initialized. Call kvt_initialize() first.";
+        return KVTError::KVT_NOT_INITIALIZED;
+    }
+    
+    // Clear previous results
+    batch_results.clear();
+    batch_results.reserve(batch_ops.size());
+    
+    bool all_successful = true;
+    std::string concatenated_errors;
+    
+    // Execute each operation individually
+    for (size_t i = 0; i < batch_ops.size(); ++i) {
+        const KVTOp& op = batch_ops[i];
+        KVTOpResult result;
+        
+        std::string op_error_msg;
+        
+        switch (op.op) {
+            case OP_GET: {
+                std::string value;
+                if (g_kvt_manager->get(tx_id, op.table_name, op.key, value, op_error_msg)) {
+                    result.error = KVTError::SUCCESS;
+                    result.value = value;
+                } else {
+                    result.error = KVTError::UNKNOWN_ERROR;
+                    result.value = "";
+                    all_successful = false;
+                }
+                break;
+            }
+            case OP_SET: {
+                if (g_kvt_manager->set(tx_id, op.table_name, op.key, op.value, op_error_msg)) {
+                    result.error = KVTError::SUCCESS;
+                    result.value = "";
+                } else {
+                    result.error = KVTError::UNKNOWN_ERROR;
+                    result.value = "";
+                    all_successful = false;
+                }
+                break;
+            }
+            case OP_DEL: {
+                if (g_kvt_manager->del(tx_id, op.table_name, op.key, op_error_msg)) {
+                    result.error = KVTError::SUCCESS;
+                    result.value = "";
+                } else {
+                    result.error = KVTError::UNKNOWN_ERROR;
+                    result.value = "";
+                    all_successful = false;
+                }
+                break;
+            }
+            default: {
+                result.error = KVTError::UNKNOWN_ERROR;
+                result.value = "";
+                op_error_msg = "Unknown operation type";
+                all_successful = false;
+                break;
+            }
+        }
+        
+        // Add error message to concatenated errors if operation failed and error string is not empty
+        if (result.error != KVTError::SUCCESS && !op_error_msg.empty()) {
+            if (!concatenated_errors.empty()) {
+                concatenated_errors += "; ";
+            }
+            concatenated_errors += "op[" + std::to_string(i) + "]: " + op_error_msg;
+        }
+        
+        batch_results.push_back(result);
+    }
+    
+    // Set the final error message
+    if (!all_successful) {
+        error_msg = concatenated_errors;
+        return KVTError::BATCH_NOT_FULLY_SUCCESS;
+    } else {
+        error_msg = "";
+        return KVTError::SUCCESS;
+    }
+}

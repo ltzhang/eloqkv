@@ -215,6 +215,7 @@ KVTError kvt_rollback_transaction(uint64_t tx_id, std::string& error_msg);
  * @param batch_ops Vector of operations to execute
  * @param batch_results Output parameter for results of each operation
  * @param error_msg Output parameter for concatenated error messages with op indices
+ *  "op[" + std::to_string(i) + "]: " + op_error + "; "
  * @return KVTError::SUCCESS if all operations successful, KVTError::BATCH_NOT_FULLY_SUCCESS if some failed
  */
 KVTError kvt_batch_execute(uint64_t tx_id,
