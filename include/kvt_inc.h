@@ -30,7 +30,7 @@ enum class KVTError {
     TRANSACTION_HAS_STALE_DATA,            // OCC validation failed due to concurrent modifications
     ONE_SHOT_WRITE_NOT_ALLOWED,           // Write operations require an active transaction
     ONE_SHOT_DELETE_NOT_ALLOWED,          // Delete operations require an active transaction
-    BATCH_NOT_FULLY_SUCCESS,                       // Some operations succeeded, some failed
+    BATCH_NOT_FULLY_SUCCESS,               // Some operations succeeded, some failed
     UNKNOWN_ERROR                          // Unknown or unexpected error
 };
 
@@ -92,9 +92,6 @@ typedef std::vector<KVTOpResult> KVTBatchResults;
  * ```
  */
 
-// Global KVT manager instance (singleton pattern)
-extern std::unique_ptr<KVTManagerWrapper> g_kvt_manager;
-
 /**
  * Initialize the KVT system.
  * Must be called before any other KVT functions.
@@ -122,12 +119,53 @@ KVTError kvt_create_table(const std::string& table_name,
                           std::string& error_msg);
 
 /**
+ * Drop/delete a table with the specified name.
+ * @param table_name Name of the table to drop
+ * @param error_msg Output parameter for error message if operation fails
+ * @return KVTError::SUCCESS if successful, appropriate error code otherwise
+ */
+KVTError kvt_drop_table(const std::string& table_name, 
+                        std::string& error_msg);
+
+/**
+ * Get the name of a table by its ID.
+ * @param table_id ID of the table
+ * @param table_name Output parameter for the table name
+ * @param error_msg Output parameter for error message if operation fails
+ * @return KVTError::SUCCESS if successful, appropriate error code otherwise
+ */
+KVTError kvt_get_table_name(uint64_t table_id, 
+                            std::string& table_name, 
+                            std::string& error_msg);
+
+/**
+ * Get the ID of a table by its name.
+ * @param table_name Name of the table
+ * @param table_id Output parameter for the table ID
+ * @param error_msg Output parameter for error message if operation fails
+ * @return KVTError::SUCCESS if successful, appropriate error code otherwise
+ */
+KVTError kvt_get_table_id(const std::string& table_name, 
+                          uint64_t& table_id, 
+                          std::string& error_msg);
+
+/**
+ * List all tables in the system.
+ * @param results Output parameter for vector of table name and ID pairs
+ * @param error_msg Output parameter for error message if operation fails
+ * @return KVTError::SUCCESS if successful, appropriate error code otherwise
+ */
+KVTError kvt_list_tables(std::vector<std::pair<std::string, uint64_t>>& results, 
+                         std::string& error_msg);
+
+/**
  * Start a new transaction.
  * @param tx_id Output parameter for transaction ID if successful (non-zero), 0 if failed
  * @param error_msg Output parameter for error message if operation fails
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
-KVTError kvt_start_transaction(uint64_t& tx_id, std::string& error_msg);
+KVTError kvt_start_transaction(uint64_t& tx_id, 
+                               std::string& error_msg);
 
 /**
  * Get a value from a table within a transaction.
@@ -139,10 +177,10 @@ KVTError kvt_start_transaction(uint64_t& tx_id, std::string& error_msg);
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_get(uint64_t tx_id, 
-            const std::string& table_name,
-            const std::string& key,
-            std::string& value,
-            std::string& error_msg);
+                const std::string& table_name,
+                const std::string& key,
+                std::string& value,
+                std::string& error_msg);
 
 /**
  * Set a key-value pair in a table within a transaction.
@@ -154,10 +192,10 @@ KVTError kvt_get(uint64_t tx_id,
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_set(uint64_t tx_id,
-            const std::string& table_name,
-            const std::string& key,
-            const std::string& value,
-            std::string& error_msg);
+                const std::string& table_name,
+                const std::string& key,
+                const std::string& value,
+                std::string& error_msg);
 
 /**
  * Delete a key from a table within a transaction.
@@ -168,9 +206,9 @@ KVTError kvt_set(uint64_t tx_id,
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_del(uint64_t tx_id, 
-    const std::string& table_name,
-    const std::string& key,
-    std::string& error_msg);
+                const std::string& table_name,
+                const std::string& key,
+                std::string& error_msg);
 
 /**
  * Scan a range of keys in a table within a transaction.
@@ -184,12 +222,12 @@ KVTError kvt_del(uint64_t tx_id,
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_scan(uint64_t tx_id,
-             const std::string& table_name,
-             const std::string& key_start,
-             const std::string& key_end,
-             size_t num_item_limit,
-             std::vector<std::pair<std::string, std::string>>& results,
-             std::string& error_msg);
+                const std::string& table_name,
+                const std::string& key_start,
+                const std::string& key_end,
+                size_t num_item_limit,
+                std::vector<std::pair<std::string, std::string>>& results,
+                std::string& error_msg);
 
 /**
  * Commit a transaction, making all changes permanent.
@@ -197,7 +235,8 @@ KVTError kvt_scan(uint64_t tx_id,
  * @param error_msg Output parameter for error message if operation fails
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
-KVTError kvt_commit_transaction(uint64_t tx_id, std::string& error_msg);
+KVTError kvt_commit_transaction(uint64_t tx_id, 
+                                std::string& error_msg);
 
 /**
  * Rollback/abort a transaction, discarding all changes.
@@ -205,7 +244,8 @@ KVTError kvt_commit_transaction(uint64_t tx_id, std::string& error_msg);
  * @param error_msg Output parameter for error message if operation fails
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
-KVTError kvt_rollback_transaction(uint64_t tx_id, std::string& error_msg);
+KVTError kvt_rollback_transaction(uint64_t tx_id, 
+                                  std::string& error_msg);
 
 /**
  * Execute a batch of operations within a transaction.

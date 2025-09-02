@@ -65,23 +65,31 @@ SYSTEM_LIBS = -lrocksdb \
               -lmimalloc \
               $(ABSEIL_LIBS)
 
-# Target executable
-TARGET = kvt_sample
+# Target executables (with _eloq suffix)
+TARGETS = kvt_sample_eloq kvt_stress_test_eloq
 
 # Source files
-SOURCES = kvt_sample.cpp
+SAMPLE_SOURCES = kvt_sample.cpp
+STRESS_SOURCES = kvt_stress_test.cpp
 
 # Object files
-OBJECTS = $(SOURCES:.cpp=.o)
+SAMPLE_OBJECTS = $(SAMPLE_SOURCES:.cpp=.o)
+STRESS_OBJECTS = $(STRESS_SOURCES:.cpp=.o)
 
 # Default target
-all: $(TARGET)
+all: $(TARGETS)
 
-# Build the executable
-$(TARGET): $(OBJECTS)
-	@echo "Linking $(TARGET)..."
-	$(CXX) $(CXXFLAGS) $(OBJECTS) -o $(TARGET) $(LIB_PATHS) -Wl,--start-group $(LIBS) -Wl,--end-group $(SYSTEM_LIBS)
-	@echo "Build complete: $(TARGET)"
+# Build kvt_sample_eloq
+kvt_sample_eloq: $(SAMPLE_OBJECTS)
+	@echo "Linking kvt_sample_eloq..."
+	$(CXX) $(CXXFLAGS) $(SAMPLE_OBJECTS) -o kvt_sample_eloq $(LIB_PATHS) -Wl,--start-group $(LIBS) -Wl,--end-group $(SYSTEM_LIBS)
+	@echo "Build complete: kvt_sample_eloq"
+
+# Build kvt_stress_test_eloq
+kvt_stress_test_eloq: $(STRESS_OBJECTS)
+	@echo "Linking kvt_stress_test_eloq..."
+	$(CXX) $(CXXFLAGS) $(STRESS_OBJECTS) -o kvt_stress_test_eloq $(LIB_PATHS) -Wl,--start-group $(LIBS) -Wl,--end-group $(SYSTEM_LIBS)
+	@echo "Build complete: kvt_stress_test_eloq"
 
 # Compile source files
 %.o: %.cpp
@@ -91,16 +99,21 @@ $(TARGET): $(OBJECTS)
 # Clean build files
 clean:
 	@echo "Cleaning..."
-	rm -f $(OBJECTS) $(TARGET)
+	rm -f $(SAMPLE_OBJECTS) $(STRESS_OBJECTS) $(TARGETS)
 	@echo "Clean complete"
 
 # Run the sample program
-run: $(TARGET)
-	@echo "Running $(TARGET)..."
-	./$(TARGET)
+run_sample: kvt_sample_eloq
+	@echo "Running kvt_sample_eloq..."
+	./kvt_sample_eloq
+
+# Run the stress test
+run_stress: kvt_stress_test_eloq
+	@echo "Running kvt_stress_test_eloq..."
+	./kvt_stress_test_eloq
 
 # Build and run
-test: all run
+test: all run_sample
 
 # Debug build
 debug: CXXFLAGS += -DDEBUG -g3 -O0
@@ -108,21 +121,25 @@ debug: all
 
 # Show configuration
 info:
-	@echo "Configuration:"
+	@echo "ELOQ Configuration:"
 	@echo "  CXX: $(CXX)"
 	@echo "  CXXFLAGS: $(CXXFLAGS)"
 	@echo "  BUILD_DIR: $(BUILD_DIR)"
+	@echo "  Targets: $(TARGETS)"
 	@echo "  Libraries: $(LIBS) $(SYSTEM_LIBS)"
 
 # Help
 help:
-	@echo "Available targets:"
-	@echo "  all     - Build the sample program (default)"
-	@echo "  clean   - Remove build artifacts"
-	@echo "  run     - Run the sample program"
-	@echo "  test    - Build and run the sample"
-	@echo "  debug   - Build with debug symbols"
-	@echo "  info    - Show build configuration"
-	@echo "  help    - Show this help message"
+	@echo "ELOQ Makefile Targets:"
+	@echo "  all         - Build both ELOQ executables (default)"
+	@echo "  kvt_sample_eloq - Build ELOQ sample program"
+	@echo "  kvt_stress_test_eloq - Build ELOQ stress test"
+	@echo "  clean       - Remove build artifacts"
+	@echo "  run_sample  - Run the ELOQ sample program"
+	@echo "  run_stress  - Run the ELOQ stress test"
+	@echo "  test        - Build and run sample"
+	@echo "  debug       - Build with debug symbols"
+	@echo "  info        - Show build configuration"
+	@echo "  help        - Show this help message"
 
-.PHONY: all clean run test debug info help
+.PHONY: all clean run_sample run_stress test debug info help

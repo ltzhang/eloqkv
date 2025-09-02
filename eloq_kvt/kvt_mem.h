@@ -61,11 +61,15 @@ struct KVTOpResult
 typedef std::vector<KVTOp> KVTBatchOps;
 typedef std::vector<KVTOpResult> KVTBatchResults;
 
-class KVTManagerWrapperInterface
+class KVTWrapper
 {
     public:
         // Table management
         virtual KVTError create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) = 0;
+        virtual KVTError drop_table(const std::string& table_name, std::string& error_msg) = 0;
+        virtual KVTError get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) = 0;
+        virtual KVTError get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) = 0;
+        virtual KVTError list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) = 0;
         virtual KVTError start_transaction(uint64_t& tx_id, std::string& error_msg) = 0;
         virtual KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) = 0;
         virtual KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) = 0;
@@ -130,7 +134,7 @@ class KVTManagerWrapperInterface
     
 };
 
-class KVTManagerWrapperNoCC : public KVTManagerWrapperInterface
+class KVTMemManagerNoCC : public KVTWrapper
 {
     private:
         std::map<std::string, std::string> table_data;
@@ -150,16 +154,20 @@ class KVTManagerWrapperNoCC : public KVTManagerWrapperInterface
             return std::make_pair(table_key.substr(0, separator_pos), table_key.substr(separator_pos + 1));
         }
     public:
-        KVTManagerWrapperNoCC()
+        KVTMemManagerNoCC()
         {
             next_table_id = 1;
             next_tx_id = 1;
         }
-        ~KVTManagerWrapperNoCC()
+        ~KVTMemManagerNoCC()
         {
         }
 
         KVTError create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) override;
+        KVTError drop_table(const std::string& table_name, std::string& error_msg) override;
+        KVTError get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) override;
+        KVTError get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) override;
+        KVTError list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) override;
         KVTError start_transaction(uint64_t& tx_id, std::string& error_msg) override;
         KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) override;
         KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) override;
@@ -176,7 +184,7 @@ class KVTManagerWrapperNoCC : public KVTManagerWrapperInterface
     }                  
 ;
 
-class KVTManagerWrapperSimple : public KVTManagerWrapperInterface
+class KVTMemManagerSimple : public KVTWrapper
 {
     private:
         std::map<std::string, std::string> table_data;
@@ -200,17 +208,21 @@ class KVTManagerWrapperSimple : public KVTManagerWrapperInterface
         std::unordered_set<std::string> delete_set;
 
     public:
-        KVTManagerWrapperSimple()
+        KVTMemManagerSimple()
         {
             next_table_id = 1;
             next_tx_id = 1;
             current_tx_id = 0;
         }
-        ~KVTManagerWrapperSimple()
+        ~KVTMemManagerSimple()
         {
         }
 
         KVTError create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) override;
+        KVTError drop_table(const std::string& table_name, std::string& error_msg) override;
+        KVTError get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) override;
+        KVTError get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) override;
+        KVTError list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) override;
         KVTError start_transaction(uint64_t& tx_id, std::string& error_msg) override;
         KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) override;
         KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) override;
@@ -227,7 +239,7 @@ class KVTManagerWrapperSimple : public KVTManagerWrapperInterface
 };
 
 
-class KVTManagerWrapperBase : public KVTManagerWrapperInterface
+class KVTMemManagerBase : public KVTWrapper
 {
     protected:
         struct Entry {
@@ -294,13 +306,13 @@ class KVTManagerWrapperBase : public KVTManagerWrapperInterface
         }
 
     public:
-        KVTManagerWrapperBase()
+        KVTMemManagerBase()
         {
             next_table_id = 1;
             next_tx_id = 1;
         }
 
-        ~KVTManagerWrapperBase()
+        ~KVTMemManagerBase()
         {
         }
     
@@ -324,6 +336,53 @@ class KVTManagerWrapperBase : public KVTManagerWrapperInterface
             
         }
 
+        KVTError drop_table(const std::string& table_name, std::string& error_msg) override
+        {
+            std::lock_guard<std::mutex> lock(global_mutex);
+            if (tables.find(table_name) == tables.end()) {
+                error_msg = "Table '" + table_name + "' not found";
+                return KVTError::TABLE_NOT_FOUND;
+            }
+            tables.erase(table_name);
+            tablename_to_id.erase(table_name);
+            return KVTError::SUCCESS;
+        }
+
+        KVTError get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) override
+        {
+            std::lock_guard<std::mutex> lock(global_mutex);
+            for (const auto& pair : tablename_to_id) {
+                if (pair.second == table_id) {
+                    table_name = pair.first;
+                    return KVTError::SUCCESS;
+                }
+            }
+            error_msg = "Table with ID " + std::to_string(table_id) + " not found";
+            return KVTError::TABLE_NOT_FOUND;
+        }
+
+        KVTError get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) override
+        {
+            std::lock_guard<std::mutex> lock(global_mutex);
+            auto it = tablename_to_id.find(table_name);
+            if (it == tablename_to_id.end()) {
+                error_msg = "Table '" + table_name + "' not found";
+                return KVTError::TABLE_NOT_FOUND;
+            }
+            table_id = it->second;
+            return KVTError::SUCCESS;
+        }
+
+        KVTError list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) override
+        {
+            std::lock_guard<std::mutex> lock(global_mutex);
+            results.clear();
+            for (const auto& pair : tablename_to_id) {
+                results.emplace_back(pair.first, pair.second);
+            }
+            return KVTError::SUCCESS;
+        }
+
         KVTError start_transaction(uint64_t& tx_id, std::string& error_msg) override {
             std::lock_guard<std::mutex> lock(global_mutex);
             uint64_t tx_id_val = next_tx_id ++;
@@ -333,7 +392,7 @@ class KVTManagerWrapperBase : public KVTManagerWrapperInterface
         }
     };
 
-class KVTManagerWrapper2PL: public KVTManagerWrapperBase
+class KVTMemManager2PL: public KVTMemManagerBase
 {
     // For table entries: metadata field stores the locking transaction ID (0 = unlocked)
     // When a transaction acquires a lock, it sets metadata to its tx_id
@@ -354,7 +413,7 @@ public:
 };
 
 
-class KVTManagerWrapperOCC: public KVTManagerWrapperBase
+class KVTMemManagerOCC: public KVTMemManagerBase
 {
     //for OCC, the metadata in an entry is the version number.
     //delete must be put into the read set so that it can keep version.
@@ -380,7 +439,5 @@ public:
                 std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) override;
   };
 
-
-typedef KVTManagerWrapper2PL KVTManagerWrapper;
 
 #endif // KVT_MEM_H

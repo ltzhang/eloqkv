@@ -1,4 +1,4 @@
-#include "kvt_mem.h"
+#include "kvt_inc.h"
 #include <iostream>
 #include <random>
 #include <thread>
@@ -8,6 +8,7 @@
 #include <sstream>
 #include <algorithm>
 #include <unordered_map>
+#include <map>
 #include <set>
 #include <cstdlib>
 #include <iomanip>
@@ -131,7 +132,6 @@ public:
 
 class KVTStressTest {
 private:
-    KVTManagerWrapperInterface* kvt_manager;
     ThreadSafeRNG main_rng;
     std::string table_name;
     uint64_t table_id;
@@ -172,7 +172,7 @@ private:
     }
     
 public:
-    KVTStressTest(KVTManagerWrapperInterface* manager) : kvt_manager(manager), main_rng(42) {  // Fixed seed for debugging
+    KVTStressTest() : main_rng(42) {  // Fixed seed for debugging
         table_name = "stress_test_table";
     }
     
@@ -181,7 +181,7 @@ public:
         
         // Create table
         std::string error_msg;
-        KVTError result = kvt_manager->create_table(table_name, "range", table_id, error_msg);
+        KVTError result = kvt_create_table(table_name, "range", table_id, error_msg);
         if (result != KVTError::SUCCESS)
             PANIC(std::cerr << "Failed to create table: " << error_msg << std::endl;);
         // Populate initial data
@@ -210,7 +210,7 @@ public:
             int diff = CONSTRAINT_DIVISOR - range_sum % CONSTRAINT_DIVISOR; 
             key_values.begin()->second += diff;
             for (auto [key, value] : key_values) {
-                KVTError result = kvt_manager->set(0, table_name, key_to_string(key), value_to_string(value), error_msg);
+                KVTError result = kvt_set(0, table_name, key_to_string(key), value_to_string(value), error_msg);
                 if (result != KVTError::SUCCESS) {
                     std::cerr << "Failed to populate initial data: " << error_msg << std::endl;
                 }
@@ -223,7 +223,7 @@ public:
         uint64_t tx_id = 0;
         // Scan entire key range
         std::vector<std::pair<std::string, std::string>> all_results;
-        KVTError result = kvt_manager->scan(tx_id, table_name, key_to_string(0), 
+        KVTError result = kvt_scan(tx_id, table_name, key_to_string(0), 
                                key_to_string(MAX_KEY), MAX_KEY, all_results, error_msg);
         if (result != KVTError::SUCCESS)
             PANIC(std::cerr << "Failed to scan database: " << error_msg << std::endl;);
@@ -255,7 +255,7 @@ public:
     TransactionContext create_transaction_context() {
         TransactionContext ctx;
         std::string error_msg;
-        KVTError result = kvt_manager->start_transaction(ctx.tx_id, error_msg);
+        KVTError result = kvt_start_transaction(ctx.tx_id, error_msg);
         if (result != KVTError::SUCCESS) 
             PANIC(std::cerr << "Failed to start transaction: " << error_msg << std::endl;);
         ctx.should_commit = main_rng.rand_bool(COMMIT_RATIO);
@@ -282,7 +282,7 @@ public:
         }
         for (int i = 0; i < 10; i++) { //try 10 times
             int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
-            KVTError result = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
+            KVTError result = kvt_get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
             if (result != KVTError::SUCCESS) {
                 if (result == KVTError::KEY_IS_LOCKED ||
                     result == KVTError::KEY_NOT_FOUND ||
@@ -320,7 +320,7 @@ public:
                 return;
             //choose a new value
             int new_value = clamp_value(ctx.rng->rand_int(0, MAX_VALUE - 1));
-            KVTError result = kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
+            KVTError result = kvt_set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to set key: " << error_msg << std::endl;);
             ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
@@ -329,7 +329,7 @@ public:
             int key = try_get_key(ctx, range_id, true);
             if (key == -1) //skip this one, cannot find key
                 return;
-            KVTError result = kvt_manager->del(ctx.tx_id, table_name, key_to_string(key), error_msg);
+            KVTError result = kvt_del(ctx.tx_id, table_name, key_to_string(key), error_msg);
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to delete key: " << error_msg << std::endl;);
             ctx.append_op({TransactionContext::Operation::OP_DEL, key, 0, 0, 0});
@@ -343,7 +343,7 @@ public:
                 end_key = tmp;
             }
             std::vector<std::pair<std::string, std::string>> results;
-            KVTError result = kvt_manager->scan(ctx.tx_id, table_name, key_to_string(start_key), key_to_string(end_key), RANGE_SIZE, results, error_msg);
+            KVTError result = kvt_scan(ctx.tx_id, table_name, key_to_string(start_key), key_to_string(end_key), RANGE_SIZE, results, error_msg);
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to scan key: " << error_msg << std::endl;);
             //append to the operations
@@ -382,19 +382,19 @@ public:
                     int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
                     int existing_value = 0;
                     std::string value;
-                    KVTError result = kvt_manager->get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
+                    KVTError result = kvt_get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
                     if (result == KVTError::SUCCESS) {
                         ctx.append_op({TransactionContext::Operation::OP_GET, key, 0,  existing_value, 0});
                         existing_value = string_to_value(value);
                         int new_value = clamp_value(existing_value + diff);
-                        result = kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
+                        result = kvt_set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
                         ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
                         done = true;
                     }
                     else if (result == KVTError::KEY_NOT_FOUND ||
                              result == KVTError::KEY_IS_DELETED) {
                         int new_value = diff; //existing value is 0
-                        result = kvt_manager->set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
+                        result = kvt_set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
                         ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
                         done = true;
                     }
@@ -420,7 +420,7 @@ public:
         if (ctx.should_commit) {
             fix_constraint(ctx);
             //commit
-            KVTError result = kvt_manager->commit_transaction(ctx.tx_id, error_msg);
+            KVTError result = kvt_commit_transaction(ctx.tx_id, error_msg);
             if (result == KVTError::SUCCESS) {
                 commit_count++;
                 return true;
@@ -435,7 +435,7 @@ public:
             }
         } else {
             //abort
-            KVTError result = kvt_manager->rollback_transaction(ctx.tx_id, error_msg);
+            KVTError result = kvt_rollback_transaction(ctx.tx_id, error_msg);
             assert(result == KVTError::SUCCESS);
             abort_count++;
         }
@@ -491,7 +491,7 @@ public:
             if (active_contexts[idx]->first == ctx.num_ops) {
                 if (ctx.should_commit) {
                     fix_constraint(ctx);
-                    KVTError result = kvt_manager->commit_transaction(ctx.tx_id, error_msg);
+                    KVTError result = kvt_commit_transaction(ctx.tx_id, error_msg);
                     if (result == KVTError::SUCCESS) {
                         commit_count++;
                     }
@@ -504,7 +504,7 @@ public:
                     }
                 }
                 else {
-                    KVTError result = kvt_manager->rollback_transaction(ctx.tx_id, error_msg);
+                    KVTError result = kvt_rollback_transaction(ctx.tx_id, error_msg);
                     assert(result == KVTError::SUCCESS);
                     abort_count++;
                 }
@@ -642,12 +642,12 @@ public:
     }
 };
 
-void test_implementation(KVTManagerWrapperInterface* wrapper, const std::string& impl_name) {
+void test_implementation(const std::string& impl_name) {
     std::cout << "\n\n##################################################" << std::endl;
     std::cout << "Testing implementation: " << impl_name << std::endl;
     std::cout << "##################################################" << std::endl;
     
-    KVTStressTest test(wrapper);
+    KVTStressTest test;
     
     if (!test.initialize()) {
         std::cerr << "Failed to initialize test for " << impl_name << std::endl;
@@ -661,19 +661,18 @@ int main(int argc, char* argv[]) {
     std::cout << "KVT Memory Database Stress Test" << std::endl;
     std::cout << "================================" << std::endl;
     
-    // Test KVTManagerWrapperOCC
-    {
-        std::cout << "\nTesting KVTManagerWrapperOCC..." << std::endl;
-        KVTManagerWrapperOCC occ_wrapper;
-        test_implementation(&occ_wrapper, "KVTManagerWrapperOCC");
+    // Initialize the KVT system
+    KVTError init_result = kvt_initialize();
+    if (init_result != KVTError::SUCCESS) {
+        std::cerr << "Failed to initialize KVT system" << std::endl;
+        return 1;
     }
     
-    // Test KVTManagerWrapper2PL
-    {
-        std::cout << "\nTesting KVTManagerWrapper2PL..." << std::endl;
-        KVTManagerWrapper2PL twopl_wrapper;
-        test_implementation(&twopl_wrapper, "KVTManagerWrapper2PL");
-    }
+    // Test with global API
+    test_implementation("Global KVT API");
+    
+    // Shutdown the KVT system
+    kvt_shutdown();
     
     std::cout << "\n\n=== ALL IMPLEMENTATIONS TESTED ===" << std::endl;
     return 0;

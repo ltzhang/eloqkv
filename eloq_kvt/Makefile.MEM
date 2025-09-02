@@ -1,0 +1,86 @@
+# Makefile.MEM - Memory-only version of KVT
+# Uses only local kvt_mem.o compiled with -fPIC
+
+# Compiler settings
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -g -fPIC
+
+# Target executables (with _mem suffix)
+TARGETS = kvt_sample_mem kvt_stress_test_mem
+
+# Source files
+SAMPLE_SOURCES = kvt_sample.cpp
+STRESS_SOURCES = kvt_stress_test.cpp
+
+# Object files
+SAMPLE_OBJECTS = $(SAMPLE_SOURCES:.cpp=.o)
+STRESS_OBJECTS = $(STRESS_SOURCES:.cpp=.o)
+MEM_OBJECTS = kvt_mem.o
+
+# Default target
+all: $(TARGETS)
+
+# Build kvt_sample_mem
+kvt_sample_mem: $(SAMPLE_OBJECTS) $(MEM_OBJECTS)
+	@echo "Linking kvt_sample_mem..."
+	$(CXX) $(CXXFLAGS) $(SAMPLE_OBJECTS) $(MEM_OBJECTS) -o kvt_sample_mem
+	@echo "Build complete: kvt_sample_mem"
+
+# Build kvt_stress_test_mem
+kvt_stress_test_mem: $(STRESS_OBJECTS) $(MEM_OBJECTS)
+	@echo "Linking kvt_stress_test_mem..."
+	$(CXX) $(CXXFLAGS) $(STRESS_OBJECTS) $(MEM_OBJECTS) -o kvt_stress_test_mem
+	@echo "Build complete: kvt_stress_test_mem"
+
+# Compile kvt_mem.cpp with -fPIC
+kvt_mem.o: kvt_mem.cpp kvt_mem.h kvt_inc.h
+	@echo "Compiling kvt_mem.cpp with -fPIC..."
+	$(CXX) $(CXXFLAGS) -c kvt_mem.cpp -o kvt_mem.o
+
+# Compile source files
+%.o: %.cpp kvt_inc.h
+	@echo "Compiling $<..."
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# Clean build files
+clean:
+	@echo "Cleaning memory-only build..."
+	rm -f $(SAMPLE_OBJECTS) $(STRESS_OBJECTS) $(MEM_OBJECTS) $(TARGETS)
+	@echo "Clean complete"
+
+# Run the sample program
+run_sample: kvt_sample_mem
+	@echo "Running kvt_sample_mem..."
+	./kvt_sample_mem
+
+# Run the stress test
+run_stress: kvt_stress_test_mem
+	@echo "Running kvt_stress_test_mem..."
+	./kvt_stress_test_mem
+
+# Debug build
+debug: CXXFLAGS += -DDEBUG -g3 -O0
+debug: clean all
+
+# Show configuration
+info:
+	@echo "Memory-only Configuration:"
+	@echo "  CXX: $(CXX)"
+	@echo "  CXXFLAGS: $(CXXFLAGS)"
+	@echo "  Targets: $(TARGETS)"
+	@echo "  Memory objects: $(MEM_OBJECTS)"
+
+# Help
+help:
+	@echo "Memory-only Makefile Targets:"
+	@echo "  all         - Build both memory-only executables (default)"
+	@echo "  kvt_sample_mem - Build memory-only sample program"
+	@echo "  kvt_stress_test_mem - Build memory-only stress test"
+	@echo "  clean       - Remove build artifacts"
+	@echo "  run_sample  - Run the memory-only sample program"
+	@echo "  run_stress  - Run the memory-only stress test"
+	@echo "  debug       - Build with debug symbols"
+	@echo "  info        - Show build configuration"
+	@echo "  help        - Show this help message"
+
+.PHONY: all clean run_sample run_stress debug info help

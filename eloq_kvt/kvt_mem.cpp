@@ -3,12 +3,15 @@
 #include <stdexcept>
 
 // Global KVT manager instance
-std::unique_ptr<KVTManagerWrapper> g_kvt_manager;
+std::unique_ptr<KVTWrapper> g_kvt_manager;
 
 // Global KVT interface functions
 KVTError kvt_initialize() {
     try {
-        g_kvt_manager = std::make_unique<KVTManagerWrapper>(); // Create simple wrapper
+        //g_kvt_manager = std::make_unique<KVTMemManagerNoCC>(); // Create simple wrapper
+        //g_kvt_manager = std::make_unique<KVTMemManagerSimple>(); // Create simple wrapper
+        //g_kvt_manager = std::make_unique<KVTMemManager2PL>(); // Create simple wrapper
+        g_kvt_manager = std::make_unique<KVTMemManagerOCC>(); // Create simple wrapper
         return KVTError::SUCCESS;
     } catch (const std::exception& e) {
         return KVTError::UNKNOWN_ERROR;
@@ -25,6 +28,38 @@ KVTError kvt_create_table(const std::string& table_name, const std::string& part
         return KVTError::KVT_NOT_INITIALIZED;
     }
     return g_kvt_manager->create_table(table_name, partition_method, table_id, error_msg);
+}
+
+KVTError kvt_drop_table(const std::string& table_name, std::string& error_msg) {
+    if (!g_kvt_manager) {
+        error_msg = "KVT system not initialized";
+        return KVTError::KVT_NOT_INITIALIZED;
+    }
+    return g_kvt_manager->drop_table(table_name, error_msg);
+}
+
+KVTError kvt_get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) {
+    if (!g_kvt_manager) {
+        error_msg = "KVT system not initialized";
+        return KVTError::KVT_NOT_INITIALIZED;
+    }
+    return g_kvt_manager->get_table_name(table_id, table_name, error_msg);
+}
+
+KVTError kvt_get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) {
+    if (!g_kvt_manager) {
+        error_msg = "KVT system not initialized";
+        return KVTError::KVT_NOT_INITIALIZED;
+    }
+    return g_kvt_manager->get_table_id(table_name, table_id, error_msg);
+}
+
+KVTError kvt_list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) {
+    if (!g_kvt_manager) {
+        error_msg = "KVT system not initialized";
+        return KVTError::KVT_NOT_INITIALIZED;
+    }
+    return g_kvt_manager->list_tables(results, error_msg);
 }
 
 KVTError kvt_start_transaction(uint64_t& tx_id, std::string& error_msg) {
@@ -101,7 +136,7 @@ KVTError kvt_batch_execute(uint64_t tx_id, const KVTBatchOps& batch_ops,
 //=============================================================================================
 
 // Table management
-KVTError KVTManagerWrapperNoCC::create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) {
+KVTError KVTMemManagerNoCC::create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (table_to_id.find(table_name) != table_to_id.end()) {
         error_msg = "Table " + table_name + " already exists";
@@ -113,24 +148,80 @@ KVTError KVTManagerWrapperNoCC::create_table(const std::string& table_name, cons
     table_id = next_table_id - 1;
     return KVTError::SUCCESS;
 }
-KVTError KVTManagerWrapperNoCC::start_transaction(uint64_t& tx_id, std::string& error_msg) {
+
+KVTError KVTMemManagerNoCC::drop_table(const std::string& table_name, std::string& error_msg) {
+    std::lock_guard<std::mutex> lock(global_mutex);
+    if (table_to_id.find(table_name) == table_to_id.end()) {
+        error_msg = "Table " + table_name + " not found";
+        return KVTError::TABLE_NOT_FOUND;
+    }
+    
+    // Remove all data associated with this table
+    auto it = table_data.begin();
+    while (it != table_data.end()) {
+        std::pair<std::string, std::string> parsed = parse_table_key(it->first);
+        if (parsed.first == table_name) {
+            it = table_data.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    
+    // Remove table from table_to_id map
+    table_to_id.erase(table_name);
+    std::cout << "drop_table " << table_name << std::endl;
+    return KVTError::SUCCESS;
+}
+
+KVTError KVTMemManagerNoCC::get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) {
+    std::lock_guard<std::mutex> lock(global_mutex);
+    for (const auto& pair : table_to_id) {
+        if (pair.second == table_id) {
+            table_name = pair.first;
+            return KVTError::SUCCESS;
+        }
+    }
+    error_msg = "Table with ID " + std::to_string(table_id) + " not found";
+    return KVTError::TABLE_NOT_FOUND;
+}
+
+KVTError KVTMemManagerNoCC::get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) {
+    std::lock_guard<std::mutex> lock(global_mutex);
+    auto it = table_to_id.find(table_name);
+    if (it == table_to_id.end()) {
+        error_msg = "Table " + table_name + " not found";
+        return KVTError::TABLE_NOT_FOUND;
+    }
+    table_id = it->second;
+    return KVTError::SUCCESS;
+}
+
+KVTError KVTMemManagerNoCC::list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) {
+    std::lock_guard<std::mutex> lock(global_mutex);
+    results.clear();
+    for (const auto& pair : table_to_id) {
+        results.emplace_back(pair.first, pair.second);
+    }
+    return KVTError::SUCCESS;
+}
+KVTError KVTMemManagerNoCC::start_transaction(uint64_t& tx_id, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     std::cout << "start_transaction " << next_tx_id << std::endl;
     next_tx_id += 1;
     tx_id = next_tx_id - 1;
     return KVTError::SUCCESS;
 }
-KVTError KVTManagerWrapperNoCC::commit_transaction(uint64_t tx_id, std::string& error_msg) 
+KVTError KVTMemManagerNoCC::commit_transaction(uint64_t tx_id, std::string& error_msg) 
 {
     std::cout << "commit_transaction " << tx_id << std::endl;
     return KVTError::SUCCESS;
 }
-KVTError KVTManagerWrapperNoCC::rollback_transaction(uint64_t tx_id, std::string& error_msg) {
+KVTError KVTMemManagerNoCC::rollback_transaction(uint64_t tx_id, std::string& error_msg) {
     std::cout << "rollback_transaction " << tx_id << std::endl;
     return KVTError::SUCCESS;
 }
 // Data operations  
-KVTError KVTManagerWrapperNoCC::get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+KVTError KVTMemManagerNoCC::get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
             std::string& value, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (tx_id >= next_tx_id) {
@@ -153,7 +244,7 @@ KVTError KVTManagerWrapperNoCC::get(uint64_t tx_id, const std::string& table_nam
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapperNoCC::set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+KVTError KVTMemManagerNoCC::set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
             const std::string& value, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (tx_id >= next_tx_id) {
@@ -170,7 +261,7 @@ KVTError KVTManagerWrapperNoCC::set(uint64_t tx_id, const std::string& table_nam
     return KVTError::SUCCESS;
 
 }
-KVTError KVTManagerWrapperNoCC::del(uint64_t tx_id, const std::string& table_name, 
+KVTError KVTMemManagerNoCC::del(uint64_t tx_id, const std::string& table_name, 
         const std::string& key, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (tx_id >= next_tx_id) {
@@ -194,7 +285,7 @@ KVTError KVTManagerWrapperNoCC::del(uint64_t tx_id, const std::string& table_nam
     }
 }
 
-KVTError KVTManagerWrapperNoCC::scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
+KVTError KVTMemManagerNoCC::scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
             const std::string& key_end, size_t num_item_limit, 
             std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
@@ -220,7 +311,7 @@ KVTError KVTManagerWrapperNoCC::scan(uint64_t tx_id, const std::string& table_na
 
 //==================================KVT ManagerWrapperSimple ===========================================================
 
-KVTError KVTManagerWrapperSimple::create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg)
+KVTError KVTMemManagerSimple::create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg)
 {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (table_to_id.find(table_name) != table_to_id.end()) {
@@ -233,7 +324,66 @@ KVTError KVTManagerWrapperSimple::create_table(const std::string& table_name, co
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapperSimple::start_transaction(uint64_t& tx_id, std::string& error_msg) {
+KVTError KVTMemManagerSimple::drop_table(const std::string& table_name, std::string& error_msg)
+{
+    std::lock_guard<std::mutex> lock(global_mutex);
+    if (table_to_id.find(table_name) == table_to_id.end()) {
+        error_msg = "Table " + table_name + " not found";
+        return KVTError::TABLE_NOT_FOUND;
+    }
+    
+    // Remove all data associated with this table
+    auto it = table_data.begin();
+    while (it != table_data.end()) {
+        std::pair<std::string, std::string> parsed = parse_table_key(it->first);
+        if (parsed.first == table_name) {
+            it = table_data.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    
+    // Remove table from table_to_id map
+    table_to_id.erase(table_name);
+    return KVTError::SUCCESS;
+}
+
+KVTError KVTMemManagerSimple::get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg)
+{
+    std::lock_guard<std::mutex> lock(global_mutex);
+    for (const auto& pair : table_to_id) {
+        if (pair.second == table_id) {
+            table_name = pair.first;
+            return KVTError::SUCCESS;
+        }
+    }
+    error_msg = "Table with ID " + std::to_string(table_id) + " not found";
+    return KVTError::TABLE_NOT_FOUND;
+}
+
+KVTError KVTMemManagerSimple::get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg)
+{
+    std::lock_guard<std::mutex> lock(global_mutex);
+    auto it = table_to_id.find(table_name);
+    if (it == table_to_id.end()) {
+        error_msg = "Table " + table_name + " not found";
+        return KVTError::TABLE_NOT_FOUND;
+    }
+    table_id = it->second;
+    return KVTError::SUCCESS;
+}
+
+KVTError KVTMemManagerSimple::list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg)
+{
+    std::lock_guard<std::mutex> lock(global_mutex);
+    results.clear();
+    for (const auto& pair : table_to_id) {
+        results.emplace_back(pair.first, pair.second);
+    }
+    return KVTError::SUCCESS;
+}
+
+KVTError KVTMemManagerSimple::start_transaction(uint64_t& tx_id, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (current_tx_id != 0) {
         error_msg = "A transaction is already running";
@@ -245,7 +395,7 @@ KVTError KVTManagerWrapperSimple::start_transaction(uint64_t& tx_id, std::string
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapperSimple::commit_transaction(uint64_t tx_id, std::string& error_msg) {
+KVTError KVTMemManagerSimple::commit_transaction(uint64_t tx_id, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (current_tx_id != tx_id) {
         error_msg = "Transaction " + std::to_string(tx_id) + " not found";
@@ -268,7 +418,7 @@ KVTError KVTManagerWrapperSimple::commit_transaction(uint64_t tx_id, std::string
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapperSimple::rollback_transaction(uint64_t tx_id, std::string& error_msg) {
+KVTError KVTMemManagerSimple::rollback_transaction(uint64_t tx_id, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (current_tx_id != tx_id) {
         error_msg = "Transaction " + std::to_string(tx_id) + " not found";
@@ -280,7 +430,7 @@ KVTError KVTManagerWrapperSimple::rollback_transaction(uint64_t tx_id, std::stri
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapperSimple::get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+KVTError KVTMemManagerSimple::get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
             std::string& value, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (table_to_id.find(table_name) == table_to_id.end()) {
@@ -314,7 +464,7 @@ KVTError KVTManagerWrapperSimple::get(uint64_t tx_id, const std::string& table_n
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapperSimple::set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+KVTError KVTMemManagerSimple::set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
             const std::string& value, std::string& error_msg)
 {
     std::lock_guard<std::mutex> lock(global_mutex);
@@ -338,7 +488,7 @@ KVTError KVTManagerWrapperSimple::set(uint64_t tx_id, const std::string& table_n
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapperSimple::del(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+KVTError KVTMemManagerSimple::del(uint64_t tx_id, const std::string& table_name, const std::string& key, 
     std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (table_to_id.find(table_name) == table_to_id.end()) {
@@ -368,7 +518,7 @@ KVTError KVTManagerWrapperSimple::del(uint64_t tx_id, const std::string& table_n
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapperSimple::scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
+KVTError KVTMemManagerSimple::scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
             const std::string& key_end, size_t num_item_limit, 
             std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
@@ -405,9 +555,9 @@ KVTError KVTManagerWrapperSimple::scan(uint64_t tx_id, const std::string& table_
 }
 
 
-//==================================KVT KVTManagerWrapper2PL ===========================================================
+//==================================KVT KVTMemManager2PL ===========================================================
 
-KVTError KVTManagerWrapper2PL::commit_transaction(uint64_t tx_id, std::string& error_msg) {
+KVTError KVTMemManager2PL::commit_transaction(uint64_t tx_id, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     Transaction* tx = get_transaction(tx_id);
     if (!tx) {
@@ -473,7 +623,7 @@ KVTError KVTManagerWrapper2PL::commit_transaction(uint64_t tx_id, std::string& e
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapper2PL::rollback_transaction(uint64_t tx_id, std::string& error_msg)  {
+KVTError KVTMemManager2PL::rollback_transaction(uint64_t tx_id, std::string& error_msg)  {
     std::lock_guard<std::mutex> lock(global_mutex);
     Transaction* tx = get_transaction(tx_id);
     if (!tx) {
@@ -527,7 +677,7 @@ KVTError KVTManagerWrapper2PL::rollback_transaction(uint64_t tx_id, std::string&
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapper2PL::get(uint64_t tx_id, const std::string& table_name, const std::string& key,
+KVTError KVTMemManager2PL::get(uint64_t tx_id, const std::string& table_name, const std::string& key,
             std::string& value, std::string& error_msg)  {
     std::lock_guard<std::mutex> lock(global_mutex);
     
@@ -605,7 +755,7 @@ KVTError KVTManagerWrapper2PL::get(uint64_t tx_id, const std::string& table_name
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapper2PL::set(uint64_t tx_id, const std::string& table_name, const std::string& key,
+KVTError KVTMemManager2PL::set(uint64_t tx_id, const std::string& table_name, const std::string& key,
             const std::string& value, std::string& error_msg)  {
     std::lock_guard<std::mutex> lock(global_mutex);
     
@@ -679,7 +829,7 @@ KVTError KVTManagerWrapper2PL::set(uint64_t tx_id, const std::string& table_name
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapper2PL::del(uint64_t tx_id, const std::string& table_name, const std::string& key,
+KVTError KVTMemManager2PL::del(uint64_t tx_id, const std::string& table_name, const std::string& key,
             std::string& error_msg)  {
     std::lock_guard<std::mutex> lock(global_mutex);
     
@@ -761,7 +911,7 @@ KVTError KVTManagerWrapper2PL::del(uint64_t tx_id, const std::string& table_name
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapper2PL::scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start,
+KVTError KVTMemManager2PL::scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start,
             const std::string& key_end, size_t num_item_limit,
             std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg)  {
     std::lock_guard<std::mutex> lock(global_mutex);
@@ -834,9 +984,9 @@ KVTError KVTManagerWrapper2PL::scan(uint64_t tx_id, const std::string& table_nam
     return KVTError::SUCCESS;
 }
 
-//==================================KVT KVTManagerWrapperOCC ===========================================================
+//==================================KVT KVTMemManagerOCC ===========================================================
 
-KVTError KVTManagerWrapperOCC::commit_transaction(uint64_t tx_id, std::string& error_msg) 
+KVTError KVTMemManagerOCC::commit_transaction(uint64_t tx_id, std::string& error_msg) 
 {
     std::lock_guard<std::mutex> lock(global_mutex);
     Transaction* tx = get_transaction(tx_id);
@@ -884,7 +1034,7 @@ KVTError KVTManagerWrapperOCC::commit_transaction(uint64_t tx_id, std::string& e
     return KVTError::SUCCESS;
 }
         
-KVTError KVTManagerWrapperOCC::rollback_transaction(uint64_t tx_id, std::string& error_msg) 
+KVTError KVTMemManagerOCC::rollback_transaction(uint64_t tx_id, std::string& error_msg) 
 {
     std::lock_guard<std::mutex> lock(global_mutex);
     Transaction* tx = get_transaction(tx_id);
@@ -896,7 +1046,7 @@ KVTError KVTManagerWrapperOCC::rollback_transaction(uint64_t tx_id, std::string&
     return KVTError::SUCCESS;
 }
 
-KVTError KVTManagerWrapperOCC::get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+KVTError KVTMemManagerOCC::get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
         std::string& value, std::string& error_msg) 
 {
     std::lock_guard<std::mutex> lock(global_mutex);
@@ -947,7 +1097,7 @@ KVTError KVTManagerWrapperOCC::get(uint64_t tx_id, const std::string& table_name
     return KVTError::SUCCESS;
 }
 
-  KVTError KVTManagerWrapperOCC::set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+  KVTError KVTMemManagerOCC::set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
            const std::string& value, std::string& error_msg) 
     {
         std::lock_guard<std::mutex> lock(global_mutex);
@@ -979,7 +1129,7 @@ KVTError KVTManagerWrapperOCC::get(uint64_t tx_id, const std::string& table_name
         return KVTError::SUCCESS;
     }
 
-KVTError KVTManagerWrapperOCC::del(uint64_t tx_id, const std::string& table_name, const std::string& key, std::string& error_msg) 
+KVTError KVTMemManagerOCC::del(uint64_t tx_id, const std::string& table_name, const std::string& key, std::string& error_msg) 
 {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (tx_id == 0) {
@@ -1024,7 +1174,7 @@ KVTError KVTManagerWrapperOCC::del(uint64_t tx_id, const std::string& table_name
 }
 
 
-KVTError KVTManagerWrapperOCC::scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
+KVTError KVTMemManagerOCC::scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
         const std::string& key_end, size_t num_item_limit, 
         std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) 
 {
