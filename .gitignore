@@ -75,4 +75,4 @@ eloq_log_service
 .cache/
 .cursor/
 doc_and_examples/
-kvt_sample/*_test
+eloq_kvt/*_test
