@@ -47,7 +47,7 @@ enum KVT_OPType //for batch operations
 struct KVTOp
 {
     enum KVT_OPType op;
-    std::string table_name;
+    uint64_t table_id;  //table ID instead of table name
     std::string key;
     std::string value;
 }; 
@@ -66,7 +66,7 @@ class KVTWrapper
     public:
         // Table management
         virtual KVTError create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) = 0;
-        virtual KVTError drop_table(const std::string& table_name, std::string& error_msg) = 0;
+        virtual KVTError drop_table(uint64_t table_id, std::string& error_msg) = 0;
         virtual KVTError get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) = 0;
         virtual KVTError get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) = 0;
         virtual KVTError list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) = 0;
@@ -74,13 +74,13 @@ class KVTWrapper
         virtual KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) = 0;
         virtual KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) = 0;
         // Data operations  
-        virtual KVTError get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+        virtual KVTError get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                  std::string& value, std::string& error_msg) = 0;
-        virtual KVTError set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+        virtual KVTError set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                  const std::string& value, std::string& error_msg) = 0;
-        virtual KVTError del(uint64_t tx_id, const std::string& table_name, 
+        virtual KVTError del(uint64_t tx_id, uint64_t table_id, 
                 const std::string& key, std::string& error_msg) = 0;
-        virtual KVTError scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
+        virtual KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
                   const std::string& key_end, size_t num_item_limit, 
                   std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) = 0;
         
@@ -100,13 +100,13 @@ class KVTWrapper
                 
                 switch (op.op) {
                     case OP_GET:
-                        result.error = get(tx_id, op.table_name, op.key, result.value, op_error);
+                        result.error = get(tx_id, op.table_id, op.key, result.value, op_error);
                         break;
                     case OP_SET:
-                        result.error = set(tx_id, op.table_name, op.key, op.value, op_error);
+                        result.error = set(tx_id, op.table_id, op.key, op.value, op_error);
                         break;
                     case OP_DEL:
-                        result.error = del(tx_id, op.table_name, op.key, op_error);
+                        result.error = del(tx_id, op.table_id, op.key, op_error);
                         break;
                     default:
                         result.error = KVTError::UNKNOWN_ERROR;
@@ -143,15 +143,29 @@ class KVTMemManagerNoCC : public KVTWrapper
         uint64_t next_tx_id;
         std::mutex global_mutex;
 
-        std::string make_table_key(const std::string& table_name, const std::string& key) {
-            assert(!table_name.empty() && table_name.find('\0') == std::string::npos);
-            assert(!key.empty() && key.find('\0') == std::string::npos);
-            return table_name + std::string(1, '\0') + key;
+        std::string make_table_key(uint64_t table_id, const std::string& key) {
+            std::string result;
+            result.resize(8 + key.size());
+            // Write table_id as 8 bytes (little-endian)
+            for (int i = 0; i < 8; ++i) {
+                result[i] = static_cast<char>((table_id >> (i * 8)) & 0xFF);
+            }
+            // Copy key after the table_id
+            std::copy(key.begin(), key.end(), result.begin() + 8);
+            return result;
         }
-        std::pair<std::string, std::string> parse_table_key(const std::string& table_key) {
-            size_t separator_pos = table_key.find('\0');
-            assert(separator_pos != std::string::npos);
-            return std::make_pair(table_key.substr(0, separator_pos), table_key.substr(separator_pos + 1));
+        std::pair<uint64_t, std::string> parse_table_key(const std::string& table_key) {
+            if (table_key.size() < 8) {
+                return std::make_pair(0, "");
+            }
+            // Read table_id from first 8 bytes (little-endian)
+            uint64_t table_id = 0;
+            for (int i = 0; i < 8; ++i) {
+                table_id |= static_cast<uint64_t>(static_cast<unsigned char>(table_key[i])) << (i * 8);
+            }
+            // Extract key (everything after the 8-byte table_id)
+            std::string key(table_key.begin() + 8, table_key.end());
+            return std::make_pair(table_id, key);
         }
     public:
         KVTMemManagerNoCC()
@@ -164,7 +178,7 @@ class KVTMemManagerNoCC : public KVTWrapper
         }
 
         KVTError create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) override;
-        KVTError drop_table(const std::string& table_name, std::string& error_msg) override;
+        KVTError drop_table(uint64_t table_id, std::string& error_msg) override;
         KVTError get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) override;
         KVTError get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) override;
         KVTError list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) override;
@@ -172,13 +186,13 @@ class KVTMemManagerNoCC : public KVTWrapper
         KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) override;
         KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) override;
         // Data operations  
-        KVTError get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+        KVTError get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                  std::string& value, std::string& error_msg) override;
-        KVTError set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+        KVTError set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                  const std::string& value, std::string& error_msg) override;
-        KVTError del(uint64_t tx_id, const std::string& table_name, 
+        KVTError del(uint64_t tx_id, uint64_t table_id, 
                 const std::string& key, std::string& error_msg) override;
-        KVTError scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
+        KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
                   const std::string& key_end, size_t num_item_limit, 
                   std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) override;
     }                  
@@ -194,13 +208,29 @@ class KVTMemManagerSimple : public KVTWrapper
         uint64_t current_tx_id;
         std::mutex global_mutex;
         //helper
-        std::string make_table_key(const std::string& table_name, const std::string& key) {
-            return table_name + std::string(1, '\0') + key;
+        std::string make_table_key(uint64_t table_id, const std::string& key) {
+            std::string result;
+            result.resize(8 + key.size());
+            // Write table_id as 8 bytes (little-endian)
+            for (int i = 0; i < 8; ++i) {
+                result[i] = static_cast<char>((table_id >> (i * 8)) & 0xFF);
+            }
+            // Copy key after the table_id
+            std::copy(key.begin(), key.end(), result.begin() + 8);
+            return result;
         }
-        std::pair<std::string, std::string> parse_table_key(const std::string& table_key) {
-            size_t separator_pos = table_key.find('\0');
-            assert(separator_pos != std::string::npos);
-            return std::make_pair(table_key.substr(0, separator_pos), table_key.substr(separator_pos + 1));
+        std::pair<uint64_t, std::string> parse_table_key(const std::string& table_key) {
+            if (table_key.size() < 8) {
+                return std::make_pair(0, "");
+            }
+            // Read table_id from first 8 bytes (little-endian)
+            uint64_t table_id = 0;
+            for (int i = 0; i < 8; ++i) {
+                table_id |= static_cast<uint64_t>(static_cast<unsigned char>(table_key[i])) << (i * 8);
+            }
+            // Extract key (everything after the 8-byte table_id)
+            std::string key(table_key.begin() + 8, table_key.end());
+            return std::make_pair(table_id, key);
         }
 
 
@@ -219,7 +249,7 @@ class KVTMemManagerSimple : public KVTWrapper
         }
 
         KVTError create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) override;
-        KVTError drop_table(const std::string& table_name, std::string& error_msg) override;
+        KVTError drop_table(uint64_t table_id, std::string& error_msg) override;
         KVTError get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) override;
         KVTError get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) override;
         KVTError list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) override;
@@ -227,13 +257,13 @@ class KVTMemManagerSimple : public KVTWrapper
         KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) override;
         KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) override;
         // Data operations  
-        KVTError get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+        KVTError get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                  std::string& value, std::string& error_msg) override;
-        KVTError set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+        KVTError set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                  const std::string& value, std::string& error_msg) override;
-        KVTError del(uint64_t tx_id, const std::string& table_name, 
+        KVTError del(uint64_t tx_id, uint64_t table_id, 
                 const std::string& key, std::string& error_msg) override;
-        KVTError scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
+        KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
                   const std::string& key_end, size_t num_item_limit, 
                   std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) override;
 };
@@ -277,16 +307,30 @@ class KVTMemManagerBase : public KVTWrapper
         uint64_t next_tx_id;
 
         //helper
-        std::string make_table_key(const std::string& table_name, const std::string& key) {
-            assert(!table_name.empty() && table_name.find('\0') == std::string::npos);
-            assert(!key.empty() && key.find('\0') == std::string::npos);
-            return table_name + std::string(1, '\0') + key;
+        std::string make_table_key(uint64_t table_id, const std::string& key) {
+            std::string result;
+            result.resize(8 + key.size());
+            // Write table_id as 8 bytes (little-endian)
+            for (int i = 0; i < 8; ++i) {
+                result[i] = static_cast<char>((table_id >> (i * 8)) & 0xFF);
+            }
+            // Copy key after the table_id
+            std::copy(key.begin(), key.end(), result.begin() + 8);
+            return result;
         }
 
-        std::pair<std::string, std::string> parse_table_key(const std::string& table_key) {
-            size_t separator_pos = table_key.find('\0');
-            assert(separator_pos != std::string::npos);
-            return std::make_pair(table_key.substr(0, separator_pos), table_key.substr(separator_pos + 1));
+        std::pair<uint64_t, std::string> parse_table_key(const std::string& table_key) {
+            if (table_key.size() < 8) {
+                return std::make_pair(0, "");
+            }
+            // Read table_id from first 8 bytes (little-endian)
+            uint64_t table_id = 0;
+            for (int i = 0; i < 8; ++i) {
+                table_id |= static_cast<uint64_t>(static_cast<unsigned char>(table_key[i])) << (i * 8);
+            }
+            // Extract key (everything after the 8-byte table_id)
+            std::string key(table_key.begin() + 8, table_key.end());
+            return std::make_pair(table_id, key);
         }
 
         Table* get_table(const std::string& table_name) {
@@ -295,6 +339,18 @@ class KVTMemManagerBase : public KVTWrapper
                 return nullptr;
             }
             return it->second.get();
+        }
+
+        Table* get_table_by_id(uint64_t table_id) {
+            for (const auto& pair : tablename_to_id) {
+                if (pair.second == table_id) {
+                    auto it = tables.find(pair.first);
+                    if (it != tables.end()) {
+                        return it->second.get();
+                    }
+                }
+            }
+            return nullptr;
         }
 
         Transaction* get_transaction(uint64_t tx_id) {
@@ -336,11 +392,18 @@ class KVTMemManagerBase : public KVTWrapper
             
         }
 
-        KVTError drop_table(const std::string& table_name, std::string& error_msg) override
+        KVTError drop_table(uint64_t table_id, std::string& error_msg) override
         {
             std::lock_guard<std::mutex> lock(global_mutex);
-            if (tables.find(table_name) == tables.end()) {
-                error_msg = "Table '" + table_name + "' not found";
+            std::string table_name;
+            for (const auto& pair : tablename_to_id) {
+                if (pair.second == table_id) {
+                    table_name = pair.first;
+                    break;
+                }
+            }
+            if (table_name.empty()) {
+                error_msg = "Table with ID " + std::to_string(table_id) + " not found";
                 return KVTError::TABLE_NOT_FOUND;
             }
             tables.erase(table_name);
@@ -401,13 +464,13 @@ public:
     KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) override;
     KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) override;
     // Data operations  
-    KVTError get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+    KVTError get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                 std::string& value, std::string& error_msg) override;
-    KVTError set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+    KVTError set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                 const std::string& value, std::string& error_msg) override;
-    KVTError del(uint64_t tx_id, const std::string& table_name, 
+    KVTError del(uint64_t tx_id, uint64_t table_id, 
             const std::string& key, std::string& error_msg) override;
-    KVTError scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
+    KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
                 const std::string& key_end, size_t num_item_limit, 
                 std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) override;
 };
@@ -428,13 +491,13 @@ public:
     KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) override;
     KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) override;
     // Data operations  
-    KVTError get(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+    KVTError get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                 std::string& value, std::string& error_msg) override;
-    KVTError set(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+    KVTError set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                 const std::string& value, std::string& error_msg) override;
-    KVTError del(uint64_t tx_id, const std::string& table_name, 
+    KVTError del(uint64_t tx_id, uint64_t table_id, 
             const std::string& key, std::string& error_msg) override;
-    KVTError scan(uint64_t tx_id, const std::string& table_name, const std::string& key_start, 
+    KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
                 const std::string& key_end, size_t num_item_limit, 
                 std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) override;
   };

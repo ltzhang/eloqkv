@@ -210,7 +210,7 @@ public:
             int diff = CONSTRAINT_DIVISOR - range_sum % CONSTRAINT_DIVISOR; 
             key_values.begin()->second += diff;
             for (auto [key, value] : key_values) {
-                KVTError result = kvt_set(0, table_name, key_to_string(key), value_to_string(value), error_msg);
+                KVTError result = kvt_set(0, table_id, key_to_string(key), value_to_string(value), error_msg);
                 if (result != KVTError::SUCCESS) {
                     std::cerr << "Failed to populate initial data: " << error_msg << std::endl;
                 }
@@ -224,7 +224,7 @@ public:
         uint64_t tx_id = 0;
         // Scan entire key range
         std::vector<std::pair<std::string, std::string>> all_results;
-        KVTError result = kvt_scan(tx_id, table_name, key_to_string(0), 
+        KVTError result = kvt_scan(tx_id, table_id, key_to_string(0), 
                                key_to_string(MAX_KEY), MAX_KEY, all_results, error_msg);
         if (result != KVTError::SUCCESS)
             PANIC(std::cerr << "Failed to scan database: " << error_msg << std::endl;);
@@ -283,7 +283,7 @@ public:
         }
         for (int i = 0; i < 10; i++) { //try 10 times
             int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
-            KVTError result = kvt_get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
+            KVTError result = kvt_get(ctx.tx_id, table_id, key_to_string(key), value, error_msg);
             if (result != KVTError::SUCCESS) {
                 if (result == KVTError::KEY_IS_LOCKED ||
                     result == KVTError::KEY_NOT_FOUND ||
@@ -321,7 +321,7 @@ public:
                 return;
             //choose a new value
             int new_value = clamp_value(ctx.rng->rand_int(0, MAX_VALUE - 1));
-            KVTError result = kvt_set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
+            KVTError result = kvt_set(ctx.tx_id, table_id, key_to_string(key), value_to_string(new_value), error_msg);
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to set key: " << error_msg << std::endl;);
             ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
@@ -330,7 +330,7 @@ public:
             int key = try_get_key(ctx, range_id, true);
             if (key == -1) //skip this one, cannot find key
                 return;
-            KVTError result = kvt_del(ctx.tx_id, table_name, key_to_string(key), error_msg);
+            KVTError result = kvt_del(ctx.tx_id, table_id, key_to_string(key), error_msg);
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to delete key: " << error_msg << std::endl;);
             ctx.append_op({TransactionContext::Operation::OP_DEL, key, 0, 0, 0});
@@ -344,7 +344,7 @@ public:
                 end_key = tmp;
             }
             std::vector<std::pair<std::string, std::string>> results;
-            KVTError result = kvt_scan(ctx.tx_id, table_name, key_to_string(start_key), key_to_string(end_key), RANGE_SIZE, results, error_msg);
+            KVTError result = kvt_scan(ctx.tx_id, table_id, key_to_string(start_key), key_to_string(end_key), RANGE_SIZE, results, error_msg);
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to scan key: " << error_msg << std::endl;);
             //append to the operations
@@ -383,19 +383,19 @@ public:
                     int key = rand() % RANGE_SIZE + range_id * RANGE_SIZE;
                     int existing_value = 0;
                     std::string value;
-                    KVTError result = kvt_get(ctx.tx_id, table_name, key_to_string(key), value, error_msg);
+                    KVTError result = kvt_get(ctx.tx_id, table_id, key_to_string(key), value, error_msg);
                     if (result == KVTError::SUCCESS) {
                         ctx.append_op({TransactionContext::Operation::OP_GET, key, 0,  existing_value, 0});
                         existing_value = string_to_value(value);
                         int new_value = clamp_value(existing_value + diff);
-                        result = kvt_set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
+                        result = kvt_set(ctx.tx_id, table_id, key_to_string(key), value_to_string(new_value), error_msg);
                         ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
                         done = true;
                     }
                     else if (result == KVTError::KEY_NOT_FOUND ||
                              result == KVTError::KEY_IS_DELETED) {
                         int new_value = diff; //existing value is 0
-                        result = kvt_set(ctx.tx_id, table_name, key_to_string(key), value_to_string(new_value), error_msg);
+                        result = kvt_set(ctx.tx_id, table_id, key_to_string(key), value_to_string(new_value), error_msg);
                         ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
                         done = true;
                     }

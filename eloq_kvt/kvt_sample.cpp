@@ -38,7 +38,7 @@ void test_basic_operations() {
     }
     
     // One-shot SET operation
-    result = kvt_set(0, "users", "user:1", "Alice", error);
+    result = kvt_set(0, table_id, "user:1", "Alice", error);
     if (result == KVTError::SUCCESS) {
         std::cout << "✓ Set user:1 = Alice" << std::endl;
     } else {
@@ -47,7 +47,7 @@ void test_basic_operations() {
     
     // One-shot GET operation
     std::string value;
-    result = kvt_get(0, "users", "user:1", value, error);
+    result = kvt_get(0, table_id, "user:1", value, error);
     if (result == KVTError::SUCCESS) {
         std::cout << "✓ Retrieved user:1 = " << value << std::endl;
         assert(value == "Alice");
@@ -56,13 +56,13 @@ void test_basic_operations() {
     }
     
     // Update the value
-    result = kvt_set(0, "users", "user:1", "Alice Smith", error);
+    result = kvt_set(0, table_id, "user:1", "Alice Smith", error);
     if (result == KVTError::SUCCESS) {
         std::cout << "✓ Updated user:1 = Alice Smith" << std::endl;
     }
     
     // Verify the update
-    result = kvt_get(0, "users", "user:1", value, error);
+    result = kvt_get(0, table_id, "user:1", value, error);
     if (result == KVTError::SUCCESS) {
         std::cout << "✓ Verified update: user:1 = " << value << std::endl;
         assert(value == "Alice Smith");
@@ -74,9 +74,17 @@ void test_transactions() {
     
     std::string error;
     
+    // Get the users table ID
+    uint64_t table_id;
+    KVTError result = kvt_get_table_id("users", table_id, error);
+    if (result != KVTError::SUCCESS) {
+        std::cerr << "Failed to get table ID: " << error << std::endl;
+        return;
+    }
+    
     // Start a transaction
     uint64_t tx_id;
-    KVTError result = kvt_start_transaction(tx_id, error);
+    result = kvt_start_transaction(tx_id, error);
     if (result != KVTError::SUCCESS) {
         std::cerr << "Failed to start transaction: " << error << std::endl;
         return;
@@ -84,19 +92,19 @@ void test_transactions() {
     std::cout << "✓ Started transaction ID: " << tx_id << std::endl;
     
     // Perform multiple operations in the transaction
-    result = kvt_set(tx_id, "users", "user:2", "Bob", error);
+    result = kvt_set(tx_id, table_id, "user:2", "Bob", error);
     if (result == KVTError::SUCCESS) {
         std::cout << "✓ Set user:2 = Bob (in transaction)" << std::endl;
     }
     
-    result = kvt_set(tx_id, "users", "user:3", "Charlie", error);
+    result = kvt_set(tx_id, table_id, "user:3", "Charlie", error);
     if (result == KVTError::SUCCESS) {
         std::cout << "✓ Set user:3 = Charlie (in transaction)" << std::endl;
     }
     
     // Read within the transaction
     std::string value;
-    result = kvt_get(tx_id, "users", "user:2", value, error);
+    result = kvt_get(tx_id, table_id, "user:2", value, error);
     if (result == KVTError::SUCCESS) {
         std::cout << "✓ Read user:2 in transaction = " << value << std::endl;
     }
@@ -110,7 +118,7 @@ void test_transactions() {
     }
     
     // Verify data persisted after commit
-    result = kvt_get(0, "users", "user:2", value, error);
+    result = kvt_get(0, table_id, "user:2", value, error);
     if (result == KVTError::SUCCESS) {
         std::cout << "✓ Verified user:2 after commit = " << value << std::endl;
         assert(value == "Bob");
@@ -122,9 +130,17 @@ void test_rollback() {
     
     std::string error;
     
+    // Get the users table ID
+    uint64_t table_id;
+    KVTError result = kvt_get_table_id("users", table_id, error);
+    if (result != KVTError::SUCCESS) {
+        std::cerr << "Failed to get table ID: " << error << std::endl;
+        return;
+    }
+    
     // Start a transaction
     uint64_t tx_id;
-    KVTError result = kvt_start_transaction(tx_id, error);
+    result = kvt_start_transaction(tx_id, error);
     if (result != KVTError::SUCCESS) {
         std::cerr << "Failed to start transaction: " << error << std::endl;
         return;
@@ -132,7 +148,7 @@ void test_rollback() {
     std::cout << "✓ Started transaction ID: " << tx_id << std::endl;
     
     // Set a value in the transaction
-    result = kvt_set(tx_id, "users", "user:4", "David", error);
+    result = kvt_set(tx_id, table_id, "user:4", "David", error);
     if (result == KVTError::SUCCESS) {
         std::cout << "✓ Set user:4 = David (in transaction)" << std::endl;
     }
@@ -147,7 +163,7 @@ void test_rollback() {
     
     // Verify data was not persisted
     std::string value;
-    result = kvt_get(0, "users", "user:4", value, error);
+    result = kvt_get(0, table_id, "user:4", value, error);
     if (result != KVTError::SUCCESS) {
         std::cout << "✓ Verified user:4 does not exist after rollback" << std::endl;
     } else {
@@ -170,16 +186,16 @@ void test_range_scan() {
     std::cout << "✓ Created range-partitioned table 'products' with ID: " << table_id << std::endl;
     
     // Insert some products
-    kvt_set(0, "products", "prod:001", "Laptop", error);
-    kvt_set(0, "products", "prod:002", "Mouse", error);
-    kvt_set(0, "products", "prod:003", "Keyboard", error);
-    kvt_set(0, "products", "prod:004", "Monitor", error);
-    kvt_set(0, "products", "prod:005", "Headphones", error);
+    kvt_set(0, table_id, "prod:001", "Laptop", error);
+    kvt_set(0, table_id, "prod:002", "Mouse", error);
+    kvt_set(0, table_id, "prod:003", "Keyboard", error);
+    kvt_set(0, table_id, "prod:004", "Monitor", error);
+    kvt_set(0, table_id, "prod:005", "Headphones", error);
     std::cout << "✓ Inserted 5 products" << std::endl;
     
     // Scan a range
     std::vector<std::pair<std::string, std::string>> results;
-    result = kvt_scan(0, "products", "prod:002", "prod:004", 10, results, error);
+    result = kvt_scan(0, table_id, "prod:002", "prod:004", 10, results, error);
     if (result == KVTError::SUCCESS) {
         std::cout << "✓ Scan from prod:002 to prod:004 returned " << results.size() << " items:" << std::endl;
         for (const auto& [key, value] : results) {
@@ -195,6 +211,14 @@ void test_concurrent_transactions() {
     
     std::string error;
     
+    // Get the users table ID
+    uint64_t table_id;
+    KVTError result = kvt_get_table_id("users", table_id, error);
+    if (result != KVTError::SUCCESS) {
+        std::cerr << "Failed to get table ID: " << error << std::endl;
+        return;
+    }
+    
     // Start two transactions
     uint64_t tx1, tx2;
     KVTError result1 = kvt_start_transaction(tx1, error);
@@ -209,11 +233,11 @@ void test_concurrent_transactions() {
     std::cout << "✓ Started transaction 2: " << tx2 << std::endl;
     
     // Transaction 1 operations
-    kvt_set(tx1, "users", "user:10", "Transaction1_User", error);
+    kvt_set(tx1, table_id, "user:10", "Transaction1_User", error);
     std::cout << "✓ TX1: Set user:10" << std::endl;
     
     // Transaction 2 operations
-    kvt_set(tx2, "users", "user:11", "Transaction2_User", error);
+    kvt_set(tx2, table_id, "user:11", "Transaction2_User", error);
     std::cout << "✓ TX2: Set user:11" << std::endl;
     
     // Commit transaction 1
@@ -230,10 +254,10 @@ void test_concurrent_transactions() {
     
     // Verify both changes persisted
     std::string value;
-    kvt_get(0, "users", "user:10", value, error);
+    kvt_get(0, table_id, "user:10", value, error);
     std::cout << "✓ Verified user:10 = " << value << std::endl;
     
-    kvt_get(0, "users", "user:11", value, error);
+    kvt_get(0, table_id, "user:11", value, error);
     std::cout << "✓ Verified user:11 = " << value << std::endl;
 }
 

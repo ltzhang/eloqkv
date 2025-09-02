@@ -45,7 +45,7 @@ enum KVT_OPType //for batch operations
 struct KVTOp
 {
     KVT_OPType op;  //operation type
-    std::string table_name;
+    uint64_t table_id;  //table ID instead of table name
     std::string key;
     std::string value;
 }; 
@@ -80,8 +80,8 @@ typedef std::vector<KVTOpResult> KVTBatchResults;
  *     // Start a transaction
  *     uint64_t tx_id = kvt_start_transaction(error);
  *     
- *     // Perform operations
- *     kvt_set(tx_id, "my_table", "key1", "value1", error);
+ *     // Perform operations using table_id
+ *     kvt_set(tx_id, table_id, "key1", "value1", error);
  *     
  *     // Commit the transaction
  *     kvt_commit_transaction(tx_id, error);
@@ -119,12 +119,12 @@ KVTError kvt_create_table(const std::string& table_name,
                           std::string& error_msg);
 
 /**
- * Drop/delete a table with the specified name.
- * @param table_name Name of the table to drop
+ * Drop/delete a table with the specified ID.
+ * @param table_id ID of the table to drop
  * @param error_msg Output parameter for error message if operation fails
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
-KVTError kvt_drop_table(const std::string& table_name, 
+KVTError kvt_drop_table(uint64_t table_id, 
                         std::string& error_msg);
 
 /**
@@ -170,14 +170,14 @@ KVTError kvt_start_transaction(uint64_t& tx_id,
 /**
  * Get a value from a table within a transaction.
  * @param tx_id Transaction ID (0 for auto-commit/one-shot operation)
- * @param table_name Name of the table
+ * @param table_id ID of the table
  * @param key Key to retrieve
  * @param value Output parameter for the retrieved value
  * @param error_msg Output parameter for error message if operation fails
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_get(uint64_t tx_id, 
-                const std::string& table_name,
+                uint64_t table_id,
                 const std::string& key,
                 std::string& value,
                 std::string& error_msg);
@@ -185,14 +185,14 @@ KVTError kvt_get(uint64_t tx_id,
 /**
  * Set a key-value pair in a table within a transaction.
  * @param tx_id Transaction ID (0 for auto-commit/one-shot operation)
- * @param table_name Name of the table
+ * @param table_id ID of the table
  * @param key Key to set
  * @param value Value to set
  * @param error_msg Output parameter for error message if operation fails
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_set(uint64_t tx_id,
-                const std::string& table_name,
+                uint64_t table_id,
                 const std::string& key,
                 const std::string& value,
                 std::string& error_msg);
@@ -200,20 +200,20 @@ KVTError kvt_set(uint64_t tx_id,
 /**
  * Delete a key from a table within a transaction.
  * @param tx_id Transaction ID (0 for auto-commit/one-shot operation)
- * @param table_name Name of the table
+ * @param table_id ID of the table
  * @param key Key to delete
  * @param error_msg Output parameter for error message if operation fails
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_del(uint64_t tx_id, 
-                const std::string& table_name,
+                uint64_t table_id,
                 const std::string& key,
                 std::string& error_msg);
 
 /**
  * Scan a range of keys in a table within a transaction.
  * @param tx_id Transaction ID (0 for auto-commit/one-shot operation)
- * @param table_name Name of the table (must be range-partitioned)
+ * @param table_id ID of the table (must be range-partitioned)
  * @param key_start Start of key range (inclusive)
  * @param key_end End of key range (inclusive)
  * @param num_item_limit Maximum number of items to return
@@ -222,7 +222,7 @@ KVTError kvt_del(uint64_t tx_id,
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_scan(uint64_t tx_id,
-                const std::string& table_name,
+                uint64_t table_id,
                 const std::string& key_start,
                 const std::string& key_end,
                 size_t num_item_limit,
