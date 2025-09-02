@@ -47,13 +47,15 @@ using KeyValuePair = std::pair<std::string, std::string>;
 
 class KVTTable {
 public:
-    KVTTable(const std::string& name, const std::string& partition_method)
-        : name_(name), partition_method_(partition_method) {}
+    KVTTable(uint64_t id, const std::string& name, const std::string& partition_method)
+        : id_(id), name_(name), partition_method_(partition_method) {}
     
+    uint64_t id() const { return id_; }
     const std::string& name() const { return name_; }
     const std::string& partition_method() const { return partition_method_; }
 
 private:
+    uint64_t id_;
     std::string name_;
     std::string partition_method_;
 };
@@ -89,14 +91,18 @@ public:
     // Business logic methods (doXXXX) - exposed for external API usage
     uint64_t doCreateTable(const std::string& table_name, const std::string& partition_method, 
                           std::string& error_msg);
+    bool doDropTable(uint64_t table_id, std::string& error_msg);
+    bool doGetTableName(uint64_t table_id, std::string& table_name, std::string& error_msg);
+    bool doGetTableId(const std::string& table_name, uint64_t& table_id, std::string& error_msg);
+    bool doListTables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg);
     uint64_t doStartTx(std::string& error_msg); //return 0 if fails
-    bool doGet(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+    bool doGet(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                 std::string& value, std::string& error_msg);
-    bool doSet(uint64_t tx_id, const std::string& table_name, 
+    bool doSet(uint64_t tx_id, uint64_t table_id, 
                 const std::string& key, const std::string& value, std::string& error_msg);
-    bool doDel(uint64_t tx_id, const std::string& table_name, 
+    bool doDel(uint64_t tx_id, uint64_t table_id, 
                 const std::string& key, std::string& error_msg);
-    bool doScan(uint64_t tx_id, const std::string& table_name, 
+    bool doScan(uint64_t tx_id, uint64_t table_id, 
                 const std::string& key_start, const std::string& key_end, size_t num_item_limit, 
                 std::vector<std::pair<std::string, std::string>>& results,
                 std::string& error_msg);
@@ -110,7 +116,8 @@ private:
     // Helper methods
     txservice::TransactionExecution* getTransaction(uint64_t tx_id);
     txservice::TransactionExecution* getOrCreateTransaction(uint64_t tx_id);
-    KVTTable* getTable(const std::string& table_name);
+    KVTTable* getTable(uint64_t table_id);
+    KVTTable* getTableByName(const std::string& table_name);
     
     // Transaction execution helpers
     txservice::TransactionExecution* newTxm(txservice::IsolationLevel iso_level,
@@ -140,8 +147,9 @@ private:    // Member variables
     std::unordered_map<uint64_t, txservice::TransactionExecution *> active_transactions_;
     std::mutex transactions_mutex_;
 
-    // Table management
-    std::unordered_map<std::string, std::unique_ptr<KVTTable>> tables_; // table_name -> table
+    // Table management - using table_id as primary key
+    std::unordered_map<uint64_t, std::unique_ptr<KVTTable>> tables_by_id_; // table_id -> table
+    std::unordered_map<std::string, uint64_t> table_name_to_id_; // table_name -> table_id
     std::mutex tables_mutex_;
 
     uint64_t next_transaction_id_{1};

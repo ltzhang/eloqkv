@@ -69,8 +69,16 @@ void KVTManager::handleCommand(const std::vector<butil::StringPiece> &args,
         uint64_t tx_id = std::stoull(args[1].as_string());
         std::string table_name = args[2].as_string();
         std::string key = args[3].as_string();
+        
+        // Convert table name to table_id
+        uint64_t table_id;
+        if (!doGetTableId(table_name, table_id, error_msg)) {
+            output->SetError(error_msg);
+            return;
+        }
+        
         std::string value;
-        if (doGet(tx_id, table_name, key, value, error_msg)) {
+        if (doGet(tx_id, table_id, key, value, error_msg)) {
             if (value.empty()) {
                 output->SetString("");
             } else {
@@ -89,7 +97,15 @@ void KVTManager::handleCommand(const std::vector<butil::StringPiece> &args,
         std::string table_name = args[2].as_string();
         std::string key = args[3].as_string();
         std::string value = args[4].as_string();
-        if (doSet(tx_id, table_name, key, value, error_msg)) {
+        
+        // Convert table name to table_id
+        uint64_t table_id;
+        if (!doGetTableId(table_name, table_id, error_msg)) {
+            output->SetError(error_msg);
+            return;
+        }
+        
+        if (doSet(tx_id, table_id, key, value, error_msg)) {
             output->SetStatus("OK");
         } else {
             output->SetError(error_msg);
@@ -105,8 +121,16 @@ void KVTManager::handleCommand(const std::vector<butil::StringPiece> &args,
         std::string key_start = args[3].as_string();
         std::string key_end = args[4].as_string();
         size_t num_item_limit = std::stoull(args[5].as_string());
+        
+        // Convert table name to table_id
+        uint64_t table_id;
+        if (!doGetTableId(table_name, table_id, error_msg)) {
+            output->SetError(error_msg);
+            return;
+        }
+        
         std::vector<std::pair<std::string, std::string>> results;
-        if (doScan(tx_id, table_name, key_start, key_end, num_item_limit, results, error_msg)) {
+        if (doScan(tx_id, table_id, key_start, key_end, num_item_limit, results, error_msg)) {
             output->SetArray(results.size() * 2);
             for (size_t i = 0; i < results.size(); i++) {
                 (*output)[i * 2].SetString(results[i].first);
@@ -180,20 +204,79 @@ uint64_t KVTManager::doCreateTable(const std::string& table_name, const std::str
                                   std::string& error_msg) {
     std::lock_guard<std::mutex> lock(tables_mutex_);
     
-    // Check if table already exists
-    if (tables_.find(table_name) != tables_.end()) {
+    // Check if table already exists by name
+    if (table_name_to_id_.find(table_name) != table_name_to_id_.end()) {
         error_msg = "Table " + table_name + " already exists";
         return 0;
     }
     
-    // Create and store the KVTTable
-    auto kvt_table = std::make_unique<KVTTable>(table_name, partition_method);
-    tables_[table_name] = std::move(kvt_table);
-    
+    // Create and store the KVTTable with new table_id
     uint64_t table_id = next_table_id_++;
+    auto kvt_table = std::make_unique<KVTTable>(table_id, table_name, partition_method);
+    
+    // Store in both maps
+    tables_by_id_[table_id] = std::move(kvt_table);
+    table_name_to_id_[table_name] = table_id;
+    
     //std::cout << "Created table " << table_name << " with partition method " << partition_method 
     //          << ", assigned table_id " << table_id << std::endl;
     return table_id;
+}
+
+bool KVTManager::doDropTable(uint64_t table_id, std::string& error_msg) {
+    std::lock_guard<std::mutex> lock(tables_mutex_);
+    
+    auto it = tables_by_id_.find(table_id);
+    if (it == tables_by_id_.end()) {
+        error_msg = "Table with ID " + std::to_string(table_id) + " not found";
+        return false;
+    }
+    
+    // Remove from both maps
+    std::string table_name = it->second->name();
+    tables_by_id_.erase(it);
+    table_name_to_id_.erase(table_name);
+    
+    return true;
+}
+
+bool KVTManager::doGetTableName(uint64_t table_id, std::string& table_name, std::string& error_msg) {
+    std::lock_guard<std::mutex> lock(tables_mutex_);
+    
+    auto it = tables_by_id_.find(table_id);
+    if (it == tables_by_id_.end()) {
+        error_msg = "Table with ID " + std::to_string(table_id) + " not found";
+        return false;
+    }
+    
+    table_name = it->second->name();
+    return true;
+}
+
+bool KVTManager::doGetTableId(const std::string& table_name, uint64_t& table_id, std::string& error_msg) {
+    std::lock_guard<std::mutex> lock(tables_mutex_);
+    
+    auto it = table_name_to_id_.find(table_name);
+    if (it == table_name_to_id_.end()) {
+        error_msg = "Table " + table_name + " not found";
+        return false;
+    }
+    
+    table_id = it->second;
+    return true;
+}
+
+bool KVTManager::doListTables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) {
+    std::lock_guard<std::mutex> lock(tables_mutex_);
+    
+    results.clear();
+    results.reserve(tables_by_id_.size());
+    
+    for (const auto& pair : tables_by_id_) {
+        results.emplace_back(pair.second->name(), pair.second->id());
+    }
+    
+    return true;
 }
 
 uint64_t KVTManager::doStartTx(std::string& error_msg) {
@@ -222,11 +305,11 @@ uint64_t KVTManager::doStartTx(std::string& error_msg) {
     return tx_id;
 }
 
-bool KVTManager::doGet(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+bool KVTManager::doGet(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                       std::string& value, std::string& error_msg) {
-    KVTTable* table = getTable(table_name);
+    KVTTable* table = getTable(table_id);
     if (!table) {
-        error_msg = "Table " + table_name + " not found";
+        error_msg = "Table with ID " + std::to_string(table_id) + " not found";
         return false;
     }
 
@@ -277,7 +360,7 @@ bool KVTManager::doGet(uint64_t tx_id, const std::string& table_name, const std:
 
     if (rec_status == RecordStatus::Deleted) {
         // Table not exist
-        error_msg = "Table " + table_name + " not found";
+        error_msg = "Table with ID " + std::to_string(table_id) + " not found";
         if (auto_commit) {
             txservice::AbortTx(txm);
         }
@@ -287,7 +370,7 @@ bool KVTManager::doGet(uint64_t tx_id, const std::string& table_name, const std:
     uint64_t schema_version = catalog_record.SchemaTs();
 
     // Add table name as prefix to distinguish between different KVT tables
-    std::string prefixed_key = table_name + ":" + key;
+    std::string prefixed_key = table->name() + ":" + key;
     EloqStringKey key_obj(prefixed_key.data(), prefixed_key.size());
     std::cout << "GET key: " << prefixed_key << std::endl;
     TxKey tx_key(&key_obj);
@@ -322,11 +405,11 @@ bool KVTManager::doGet(uint64_t tx_id, const std::string& table_name, const std:
     return true;
 }
 
-bool KVTManager::doSet(uint64_t tx_id, const std::string& table_name, 
+bool KVTManager::doSet(uint64_t tx_id, uint64_t table_id, 
                       const std::string& key, const std::string& value, std::string& error_msg) {
-    KVTTable* table = getTable(table_name);
+    KVTTable* table = getTable(table_id);
     if (!table) {
-        error_msg = "Table " + table_name + " not found";
+        error_msg = "Table with ID " + std::to_string(table_id) + " not found";
         return false;
     }
     
@@ -377,7 +460,7 @@ bool KVTManager::doSet(uint64_t tx_id, const std::string& table_name,
 
     if (rec_status == RecordStatus::Deleted) {
         // Table not exist
-        error_msg = "Table " + table_name + " not found";
+        error_msg = "Table with ID " + std::to_string(table_id) + " not found";
         if (auto_commit) {
             txservice::AbortTx(txm);
         }
@@ -387,7 +470,7 @@ bool KVTManager::doSet(uint64_t tx_id, const std::string& table_name,
     uint64_t schema_version = catalog_record.SchemaTs();
 
     // Add table name as prefix to distinguish between different KVT tables
-    std::string prefixed_key = table_name + ":" + key;
+    std::string prefixed_key = table->name() + ":" + key;
     EloqStringKey key_obj(prefixed_key.data(), prefixed_key.size());
     TxKey tx_key(&key_obj);
     EloqStringRecord record;
@@ -436,24 +519,24 @@ bool KVTManager::doSet(uint64_t tx_id, const std::string& table_name,
     return true;
 }
 
-bool KVTManager::doDel(uint64_t tx_id, const std::string& table_name, const std::string& key, 
+bool KVTManager::doDel(uint64_t tx_id, uint64_t table_id, const std::string& key, 
                       std::string& error_msg) {
-    KVTTable* table = getTable(table_name);
+    KVTTable* table = getTable(table_id);
     if (!table) {
-        error_msg = "Table " + table_name + " not found";
+        error_msg = "Table with ID " + std::to_string(table_id) + " not found";
         return false;
     }
     assert(0 && " Not Implemented Yet");
 }
 
 
-bool KVTManager::doScan(uint64_t tx_id, const std::string& table_name, 
+bool KVTManager::doScan(uint64_t tx_id, uint64_t table_id, 
                        const std::string& key_start, const std::string& key_end, size_t num_item_limit, 
                        std::vector<std::pair<std::string, std::string>>& results,
                        std::string& error_msg) {
-    KVTTable* table = getTable(table_name);
+    KVTTable* table = getTable(table_id);
     if (!table) {
-        error_msg = "Table " + table_name + " not found";
+        error_msg = "Table with ID " + std::to_string(table_id) + " not found";
         return false;
     }
     
@@ -503,7 +586,7 @@ bool KVTManager::doScan(uint64_t tx_id, const std::string& table_name,
 
     if (rec_status == RecordStatus::Deleted) {
         // Table not exist
-        error_msg = "Table " + table_name + " not found";
+        error_msg = "Table with ID " + std::to_string(table_id) + " not found";
         if (auto_commit) {
             txservice::AbortTx(txm);
         }
@@ -513,8 +596,8 @@ bool KVTManager::doScan(uint64_t tx_id, const std::string& table_name,
     uint64_t schema_version = catalog_record.SchemaTs();
 
     // Add table name as prefix to distinguish between different KVT tables
-    std::string prefixed_start_key = table_name + ":" + key_start;
-    std::string prefixed_end_key = table_name + ":" + key_end;
+    std::string prefixed_start_key = table->name() + ":" + key_start;
+    std::string prefixed_end_key = table->name() + ":" + key_end;
     EloqStringKey start_key_obj(prefixed_start_key.data(), prefixed_start_key.size());
     EloqStringKey end_key_obj(prefixed_end_key.data(), prefixed_end_key.size());
     TxKey start_tx_key(&start_key_obj);
@@ -596,7 +679,7 @@ bool KVTManager::doScan(uint64_t tx_id, const std::string& table_name,
                 
                 // Strip table name prefix from the key
                 std::string key = prefixed_key;
-                size_t colon_pos = prefixed_key.find(table_name + ":");
+                size_t colon_pos = prefixed_key.find(table->name() + ":");
                 if (colon_pos != std::string::npos) {
                     key = prefixed_key.substr(colon_pos + 1);
                 }
@@ -738,10 +821,20 @@ txservice::TransactionExecution* KVTManager::getOrCreateTransaction(uint64_t tx_
     return getTransaction(tx_id);
 }
 
-KVTTable* KVTManager::getTable(const std::string& table_name) {
+KVTTable* KVTManager::getTable(uint64_t table_id) {
     std::lock_guard<std::mutex> lock(tables_mutex_);
-    auto it = tables_.find(table_name);
-    return (it != tables_.end()) ? it->second.get() : nullptr;
+    auto it = tables_by_id_.find(table_id);
+    return (it != tables_by_id_.end()) ? it->second.get() : nullptr;
+}
+
+KVTTable* KVTManager::getTableByName(const std::string& table_name) {
+    std::lock_guard<std::mutex> lock(tables_mutex_);
+    auto it = table_name_to_id_.find(table_name);
+    if (it == table_name_to_id_.end()) {
+        return nullptr;
+    }
+    auto table_it = tables_by_id_.find(it->second);
+    return (table_it != tables_by_id_.end()) ? table_it->second.get() : nullptr;
 }
 
 txservice::TransactionExecution* KVTManager::newTxm(txservice::IsolationLevel iso_level,

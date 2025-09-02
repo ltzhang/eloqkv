@@ -34,6 +34,38 @@ public:
         return manager_->doCreateTable(table_name, partition_method, error_msg);
     }
     
+    bool dropTable(uint64_t table_id, std::string& error_msg) {
+        if (!manager_) {
+            error_msg = "KVTManager not initialized";
+            return false;
+        }
+        return manager_->doDropTable(table_id, error_msg);
+    }
+    
+    bool getTableName(uint64_t table_id, std::string& table_name, std::string& error_msg) {
+        if (!manager_) {
+            error_msg = "KVTManager not initialized";
+            return false;
+        }
+        return manager_->doGetTableName(table_id, table_name, error_msg);
+    }
+    
+    bool getTableId(const std::string& table_name, uint64_t& table_id, std::string& error_msg) {
+        if (!manager_) {
+            error_msg = "KVTManager not initialized";
+            return false;
+        }
+        return manager_->doGetTableId(table_name, table_id, error_msg);
+    }
+    
+    bool listTables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) {
+        if (!manager_) {
+            error_msg = "KVTManager not initialized";
+            return false;
+        }
+        return manager_->doListTables(results, error_msg);
+    }
+    
     uint64_t startTransaction(std::string& error_msg) {
         if (!manager_) {
             error_msg = "KVTManager not initialized";
@@ -42,34 +74,34 @@ public:
         return manager_->doStartTx(error_msg);
     }
     
-    bool get(uint64_t tx_id, const std::string& table_name, 
+    bool get(uint64_t tx_id, uint64_t table_id, 
             const std::string& key, std::string& value, std::string& error_msg) {
         if (!manager_) {
             error_msg = "KVTManager not initialized";
             return false;
         }
-        return manager_->doGet(tx_id, table_name, key, value, error_msg);
+        return manager_->doGet(tx_id, table_id, key, value, error_msg);
     }
     
-    bool set(uint64_t tx_id, const std::string& table_name,
+    bool set(uint64_t tx_id, uint64_t table_id,
             const std::string& key, const std::string& value, std::string& error_msg) {
         if (!manager_) {
             error_msg = "KVTManager not initialized";
             return false;
         }
-        return manager_->doSet(tx_id, table_name, key, value, error_msg);
+        return manager_->doSet(tx_id, table_id, key, value, error_msg);
     }
 
-    bool del(uint64_t tx_id, const std::string& table_name, 
+    bool del(uint64_t tx_id, uint64_t table_id, 
         const std::string& key, std::string& error_msg) {
         if (!manager_) {
             error_msg = "KVTManager not initialized";
             return false;
         }
-        return manager_->doDel(tx_id, table_name, key, error_msg);
+        return manager_->doDel(tx_id, table_id, key, error_msg);
     }
 
-    bool scan(uint64_t tx_id, const std::string& table_name,
+    bool scan(uint64_t tx_id, uint64_t table_id,
              const std::string& key_start, const std::string& key_end,
              size_t num_item_limit, std::vector<std::pair<std::string, std::string>>& results,
              std::string& error_msg) {
@@ -77,7 +109,7 @@ public:
             error_msg = "KVTManager not initialized";
             return false;
         }
-        return manager_->doScan(tx_id, table_name, key_start, key_end, 
+        return manager_->doScan(tx_id, table_id, key_start, key_end, 
                                num_item_limit, results, error_msg);
     }
     
@@ -150,6 +182,64 @@ KVTError kvt_create_table(const std::string& table_name,
     return KVTError::SUCCESS;
 }
 
+KVTError kvt_drop_table(uint64_t table_id, 
+                        std::string& error_msg) {
+    if (!g_kvt_manager) {
+        error_msg = "KVT system not initialized. Call kvt_initialize() first.";
+        return KVTError::KVT_NOT_INITIALIZED;
+    }
+    
+    if (g_kvt_manager->dropTable(table_id, error_msg)) {
+        return KVTError::SUCCESS;
+    } else {
+        return KVTError::UNKNOWN_ERROR;
+    }
+}
+
+KVTError kvt_get_table_name(uint64_t table_id, 
+                            std::string& table_name, 
+                            std::string& error_msg) {
+    if (!g_kvt_manager) {
+        error_msg = "KVT system not initialized. Call kvt_initialize() first.";
+        return KVTError::KVT_NOT_INITIALIZED;
+    }
+    
+    if (g_kvt_manager->getTableName(table_id, table_name, error_msg)) {
+        return KVTError::SUCCESS;
+    } else {
+        return KVTError::UNKNOWN_ERROR;
+    }
+}
+
+KVTError kvt_get_table_id(const std::string& table_name, 
+                          uint64_t& table_id, 
+                          std::string& error_msg) {
+    if (!g_kvt_manager) {
+        error_msg = "KVT system not initialized. Call kvt_initialize() first.";
+        return KVTError::KVT_NOT_INITIALIZED;
+    }
+    
+    if (g_kvt_manager->getTableId(table_name, table_id, error_msg)) {
+        return KVTError::SUCCESS;
+    } else {
+        return KVTError::UNKNOWN_ERROR;
+    }
+}
+
+KVTError kvt_list_tables(std::vector<std::pair<std::string, uint64_t>>& results, 
+                         std::string& error_msg) {
+    if (!g_kvt_manager) {
+        error_msg = "KVT system not initialized. Call kvt_initialize() first.";
+        return KVTError::KVT_NOT_INITIALIZED;
+    }
+    
+    if (g_kvt_manager->listTables(results, error_msg)) {
+        return KVTError::SUCCESS;
+    } else {
+        return KVTError::UNKNOWN_ERROR;
+    }
+}
+
 KVTError kvt_start_transaction(uint64_t& tx_id, std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT system not initialized. Call kvt_initialize() first.";
@@ -164,16 +254,16 @@ KVTError kvt_start_transaction(uint64_t& tx_id, std::string& error_msg) {
 }
 
 KVTError kvt_get(uint64_t tx_id, 
-            const std::string& table_name,
-            const std::string& key,
-            std::string& value,
-            std::string& error_msg) {
+                uint64_t table_id,
+                const std::string& key,
+                std::string& value,
+                std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT system not initialized. Call kvt_initialize() first.";
         return KVTError::KVT_NOT_INITIALIZED;
     }
     
-    if (g_kvt_manager->get(tx_id, table_name, key, value, error_msg)) {
+    if (g_kvt_manager->get(tx_id, table_id, key, value, error_msg)) {
         return KVTError::SUCCESS;
     } else {
         return KVTError::UNKNOWN_ERROR;
@@ -181,16 +271,16 @@ KVTError kvt_get(uint64_t tx_id,
 }
 
 KVTError kvt_set(uint64_t tx_id,
-            const std::string& table_name,
-            const std::string& key,
-            const std::string& value,
-            std::string& error_msg) {
+                uint64_t table_id,
+                const std::string& key,
+                const std::string& value,
+                std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT system not initialized. Call kvt_initialize() first.";
         return KVTError::KVT_NOT_INITIALIZED;
     }
     
-    if (g_kvt_manager->set(tx_id, table_name, key, value, error_msg)) {
+    if (g_kvt_manager->set(tx_id, table_id, key, value, error_msg)) {
         return KVTError::SUCCESS;
     } else {
         return KVTError::UNKNOWN_ERROR;
@@ -198,15 +288,15 @@ KVTError kvt_set(uint64_t tx_id,
 }
 
 KVTError kvt_del(uint64_t tx_id, 
-    const std::string& table_name,
-    const std::string& key,
-    std::string& error_msg) {
+                uint64_t table_id,
+                const std::string& key,
+                std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT system not initialized. Call kvt_initialize() first.";
         return KVTError::KVT_NOT_INITIALIZED;
     }
     
-    if (g_kvt_manager->del(tx_id, table_name, key, error_msg)) {
+    if (g_kvt_manager->del(tx_id, table_id, key, error_msg)) {
         return KVTError::SUCCESS;
     } else {
         return KVTError::UNKNOWN_ERROR;
@@ -214,18 +304,18 @@ KVTError kvt_del(uint64_t tx_id,
 }
 
 KVTError kvt_scan(uint64_t tx_id,
-             const std::string& table_name,
-             const std::string& key_start,
-             const std::string& key_end,
-             size_t num_item_limit,
-             std::vector<std::pair<std::string, std::string>>& results,
-             std::string& error_msg) {
+                uint64_t table_id,
+                const std::string& key_start,
+                const std::string& key_end,
+                size_t num_item_limit,
+                std::vector<std::pair<std::string, std::string>>& results,
+                std::string& error_msg) {
     if (!g_kvt_manager) {
         error_msg = "KVT system not initialized. Call kvt_initialize() first.";
         return KVTError::KVT_NOT_INITIALIZED;
     }
     
-    if (g_kvt_manager->scan(tx_id, table_name, key_start, key_end, 
+    if (g_kvt_manager->scan(tx_id, table_id, key_start, key_end, 
                            num_item_limit, results, error_msg)) {
         return KVTError::SUCCESS;
     } else {
@@ -285,7 +375,7 @@ KVTError kvt_batch_execute(uint64_t tx_id,
         switch (op.op) {
             case OP_GET: {
                 std::string value;
-                if (g_kvt_manager->get(tx_id, op.table_name, op.key, value, op_error_msg)) {
+                if (g_kvt_manager->get(tx_id, op.table_id, op.key, value, op_error_msg)) {
                     result.error = KVTError::SUCCESS;
                     result.value = value;
                 } else {
@@ -296,7 +386,7 @@ KVTError kvt_batch_execute(uint64_t tx_id,
                 break;
             }
             case OP_SET: {
-                if (g_kvt_manager->set(tx_id, op.table_name, op.key, op.value, op_error_msg)) {
+                if (g_kvt_manager->set(tx_id, op.table_id, op.key, op.value, op_error_msg)) {
                     result.error = KVTError::SUCCESS;
                     result.value = "";
                 } else {
@@ -307,7 +397,7 @@ KVTError kvt_batch_execute(uint64_t tx_id,
                 break;
             }
             case OP_DEL: {
-                if (g_kvt_manager->del(tx_id, op.table_name, op.key, op_error_msg)) {
+                if (g_kvt_manager->del(tx_id, op.table_id, op.key, op_error_msg)) {
                     result.error = KVTError::SUCCESS;
                     result.value = "";
                 } else {
