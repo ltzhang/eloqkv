@@ -34,7 +34,7 @@ enum class KVTError {
     UNKNOWN_ERROR                          // Unknown or unexpected error
 };
 
-enum KVT_OP //for batch operations
+enum KVT_OPType //for batch operations
 {
     OP_UNKNOWN,
     OP_GET,
@@ -44,15 +44,15 @@ enum KVT_OP //for batch operations
 
 struct KVTOp
 {
-    KVT_OP op;
+    KVT_OPType op;  //operation type
     std::string table_name;
     std::string key;
     std::string value;
 }; 
 struct KVTOpResult
 {
-    KVTError error;
-    std::string value; //only valide for get operation
+    KVTError error;     //error code for each operation
+    std::string value;  //only valide for get operation
 }; 
 
 typedef std::vector<KVTOp> KVTBatchOps;
