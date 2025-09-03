@@ -12,6 +12,9 @@
 #include <iostream>
 #include <algorithm>
 
+#define DEBUG(x) {x;}
+//#define DEBUG(x) {}
+
 /**
  * KVT Error Codes
  * 
@@ -64,6 +67,9 @@ typedef std::vector<KVTOpResult> KVTBatchResults;
 class KVTWrapper
 {
     public:
+        // Virtual destructor to ensure proper cleanup of derived classes
+        virtual ~KVTWrapper() = default;
+        
         // Table management
         virtual KVTError create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) = 0;
         virtual KVTError drop_table(uint64_t table_id, std::string& error_msg) = 0;
