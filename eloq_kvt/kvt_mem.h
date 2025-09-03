@@ -86,6 +86,7 @@ class KVTWrapper
                  const std::string& value, std::string& error_msg) = 0;
         virtual KVTError del(uint64_t tx_id, uint64_t table_id, 
                 const std::string& key, std::string& error_msg) = 0;
+        // Scan keys in range [key_start, key_end) - key_start inclusive, key_end exclusive
         virtual KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
                   const std::string& key_end, size_t num_item_limit, 
                   std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) = 0;

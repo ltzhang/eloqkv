@@ -215,7 +215,7 @@ KVTError kvt_del(uint64_t tx_id,
  * @param tx_id Transaction ID (0 for auto-commit/one-shot operation)
  * @param table_id ID of the table (must be range-partitioned)
  * @param key_start Start of key range (inclusive)
- * @param key_end End of key range (inclusive)
+ * @param key_end End of key range (exclusive)
  * @param num_item_limit Maximum number of items to return
  * @param results Output parameter for key-value pairs found
  * @param error_msg Output parameter for error message if operation fails

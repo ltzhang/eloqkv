@@ -1058,7 +1058,7 @@ KVTError KVTMemManager2PL::scan(uint64_t tx_id, uint64_t table_id, const std::st
     // One-shot scan
     if (tx_id == 0) {
         for (auto it = table->data.lower_bound(key_start); 
-                it != table->data.end() && it->first <= key_end && results.size() < num_item_limit;
+                it != table->data.end() && it->first < key_end && results.size() < num_item_limit;
                 ++it) {
             //read operation just go through all keys, as locks are supposed to be "read lock"
             results.emplace_back(it->first, it->second.data);
@@ -1090,7 +1090,7 @@ KVTError KVTMemManager2PL::scan(uint64_t tx_id, uint64_t table_id, const std::st
     // Then scan table, we do not lock the range or the read keys, 
     // so we are "read committed" i.e. allow phantom
     for (auto it = table->data.lower_bound(key_start);
-            it != table->data.end() && it->first <= key_end;
+            it != table->data.end() && it->first < key_end;
             ++it) {
         std::string table_key = make_table_key(table_id, it->first);
         // Skip if deleted
@@ -1316,7 +1316,7 @@ KVTError KVTMemManagerOCC::scan(uint64_t tx_id, uint64_t table_id, const std::st
         return KVTError::TABLE_NOT_FOUND;
     }
     if (tx_id == 0) {
-        for (auto itr = table->data.lower_bound(key_start); itr != table->data.end() && itr->first <= key_end; ++itr) {
+        for (auto itr = table->data.lower_bound(key_start); itr != table->data.end() && itr->first < key_end; ++itr) {
             results.emplace_back(itr->first, itr->second.data);
             if (results.size() >= num_item_limit) {
                 break;
@@ -1334,7 +1334,7 @@ KVTError KVTMemManagerOCC::scan(uint64_t tx_id, uint64_t table_id, const std::st
         std::string table_key_start = make_table_key(table_id, key_start);
         std::string table_key_end = make_table_key(table_id, key_end);
         //first put all write_set into results
-        for (auto itr = tx->write_set.lower_bound(table_key_start); itr != tx->write_set.end() && itr->first <= table_key_end; ++itr) {
+        for (auto itr = tx->write_set.lower_bound(table_key_start); itr != tx->write_set.end() && itr->first < table_key_end; ++itr) {
             auto [table_id_parsed, key] = parse_table_key(itr->first);
             results_writes[key] = itr->second.data;
             if (results_writes.size() >= num_item_limit) {
@@ -1344,7 +1344,7 @@ KVTError KVTMemManagerOCC::scan(uint64_t tx_id, uint64_t table_id, const std::st
     }
     std::map<std::string, std::string> results_table;
     //now collect from table, put into read_set if necessary
-    for (auto itr = table->data.lower_bound(key_start); itr != table->data.end() && itr->first <= key_end; ++itr) {
+    for (auto itr = table->data.lower_bound(key_start); itr != table->data.end() && itr->first < key_end; ++itr) {
         if (results_writes.find(itr->first) != results_writes.end()) //already in write set, skip
             continue;
         std::string table_key = make_table_key(table_id, itr->first);
