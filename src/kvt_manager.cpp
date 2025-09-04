@@ -177,7 +177,6 @@ void KVTManager::initialize(txservice::TxService* tx_service,
                           txservice::CatalogFactory* catalog_factory) {
     tx_service_ = tx_service;
     catalog_factory_ = catalog_factory;
-    
     // NOTE: In a full implementation, we would:
     // 1. Use catalog_factory to create table schemas dynamically
     // 2. Register tables with tx_service

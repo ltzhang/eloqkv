@@ -62,7 +62,55 @@ class KVTWrapper
         virtual KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
                   const std::string& key_end, size_t num_item_limit, 
                   std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) = 0;
-        
+
+        virtual KVTError update(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+                 KVUpdateFunc & func, const std::string& parameter, std::string& result_value, std::string& error_msg)
+                {
+                    std::string orig_value;
+                    KVTError r_get = get(tx_id, table_id, key, orig_value, error_msg);
+                    if (r_get != KVTError::SUCCESS)
+                        return r_get;
+                    std::string new_value;
+                    std::pair<bool, bool> r_update = func(key, orig_value, parameter, new_value, result_value);
+                    if (!r_update.first) { //function failed
+                        error_msg = std::move(result_value);
+                        return KVTError::EXT_FUNC_ERROR;
+                    }
+                    if (r_update.second) { //value needs update
+                        KVTError r_set = set(tx_id, table_id, key, new_value, error_msg);
+                        if (r_set != KVTError::SUCCESS)
+                            return r_set;
+                    }
+                    return KVTError::SUCCESS;
+                                 
+                }
+        virtual KVTError range_update(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
+                  const std::string& key_end, size_t num_item_limit, 
+                  KVUpdateFunc & func, const std::string& parameter, std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg)
+                {
+                    std::vector<std::pair<std::string, std::string>> temp_results;
+                    KVTError r_scan = scan(tx_id, table_id, key_start, key_end, num_item_limit, temp_results, error_msg);
+                    if (r_scan != KVTError::SUCCESS && r_scan != KVTError::SCAN_LIMIT_REACHED)
+                        return r_scan;
+                    for (auto& [key, orig_value] : temp_results) {
+                        std::string new_value;
+                        std::string result_value;
+                        std::pair<bool, bool> r_update = func(key, orig_value, parameter, new_value, result_value);
+                        if (!r_update.first) { //function failed
+                            error_msg = std::move(result_value);
+                            return KVTError::EXT_FUNC_ERROR;
+                        }
+                        if (r_update.second) { //value needs update
+                            KVTError r_set = set(tx_id, table_id, key, new_value, error_msg);
+                            if (r_set != KVTError::SUCCESS)
+                                return r_set;
+                        }
+                        results.emplace_back(key, result_value);
+                    }
+                    return r_scan;
+                                 
+                }
+ 
         // Default batch execute implementation - executes operations individually
         virtual KVTError batch_execute(uint64_t tx_id, const KVTBatchOps& batch_ops, 
                   KVTBatchResults& batch_results, std::string& error_msg) {

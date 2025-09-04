@@ -5,6 +5,7 @@
 #include <vector>
 #include <utility>
 #include <cstdint>
+#include <functional>
 
 /**
  * KVT Error Codes
@@ -24,9 +25,11 @@
     KEY_IS_DELETED,                        // Key was deleted in the current transaction
     KEY_IS_LOCKED,                         // Key is locked by another transaction (2PL)
     TRANSACTION_HAS_STALE_DATA,            // OCC validation failed due to concurrent modifications
-    ONE_SHOT_WRITE_NOT_ALLOWED,           // Write operations require an active transaction
-    ONE_SHOT_DELETE_NOT_ALLOWED,          // Delete operations require an active transaction
+    ONE_SHOT_WRITE_NOT_ALLOWED,            // Write operations require an active transaction
+    ONE_SHOT_DELETE_NOT_ALLOWED,           // Delete operations require an active transaction
     BATCH_NOT_FULLY_SUCCESS,               // Some operations succeeded, some failed
+    SCAN_LIMIT_REACHED,                    // Scan limit reached: this is not an error,
+    EXT_FUNC_ERROR,                        // Error returned from external function
     UNKNOWN_ERROR                          // Unknown or unexpected error
 };
 
@@ -125,7 +128,7 @@ void kvt_shutdown();
  * @param table_name Name of the table to create
  * @param partition_method Partitioning method: "hash" or "range"
  * @param table_id Output parameter for table ID if successful (non-zero), 0 if failed
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_create_table(const std::string& table_name, 
@@ -136,7 +139,7 @@ KVTError kvt_create_table(const std::string& table_name,
 /**
  * Drop/delete a table with the specified ID.
  * @param table_id ID of the table to drop
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_drop_table(uint64_t table_id, 
@@ -146,7 +149,7 @@ KVTError kvt_drop_table(uint64_t table_id,
  * Get the name of a table by its ID.
  * @param table_id ID of the table
  * @param table_name Output parameter for the table name
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_get_table_name(uint64_t table_id, 
@@ -157,7 +160,7 @@ KVTError kvt_get_table_name(uint64_t table_id,
  * Get the ID of a table by its name.
  * @param table_name Name of the table
  * @param table_id Output parameter for the table ID
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_get_table_id(const std::string& table_name, 
@@ -167,7 +170,7 @@ KVTError kvt_get_table_id(const std::string& table_name,
 /**
  * List all tables in the system.
  * @param results Output parameter for vector of table name and ID pairs
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_list_tables(std::vector<std::pair<std::string, uint64_t>>& results, 
@@ -176,7 +179,7 @@ KVTError kvt_list_tables(std::vector<std::pair<std::string, uint64_t>>& results,
 /**
  * Start a new transaction.
  * @param tx_id Output parameter for transaction ID if successful (non-zero), 0 if failed
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_start_transaction(uint64_t& tx_id, 
@@ -188,7 +191,7 @@ KVTError kvt_start_transaction(uint64_t& tx_id,
  * @param table_id ID of the table
  * @param key Key to retrieve
  * @param value Output parameter for the retrieved value
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_get(uint64_t tx_id, 
@@ -203,7 +206,7 @@ KVTError kvt_get(uint64_t tx_id,
  * @param table_id ID of the table
  * @param key Key to set
  * @param value Value to set
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_set(uint64_t tx_id,
@@ -217,7 +220,7 @@ KVTError kvt_set(uint64_t tx_id,
  * @param tx_id Transaction ID (0 for auto-commit/one-shot operation)
  * @param table_id ID of the table
  * @param key Key to delete
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_del(uint64_t tx_id, 
@@ -233,7 +236,7 @@ KVTError kvt_del(uint64_t tx_id,
  * @param key_end End of key range (exclusive)
  * @param num_item_limit Maximum number of items to return
  * @param results Output parameter for key-value pairs found
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_scan(uint64_t tx_id,
@@ -260,22 +263,75 @@ KVTError kvt_scan(uint64_t tx_id,
     KVTBatchResults& batch_results,
     std::string& error_msg);
 
+//first return value mark success or failure                                  
+//second return value mark if value needs update, if true, new value is set, otherwise, keep original value unchanged. 
+typedef std::function<std::pair<bool /*success*/, bool /*update value*/> (
+    const std::string& /* key */, 
+    const std::string& /* original value*/, 
+    const std::string& /* parameter value*/, 
+    std::string& /*new value to be set*/, 
+    std::string& /*result value returned to user, or error message if not SUCCESS*/)> KVUpdateFunc;
+
+
+ /**
+ * @param tx_id Transaction ID (0 for auto-commit/one-shot operation)
+ * @param table_id ID of the table
+ * @param key Key to update
+ * @param func Function to update the value
+ * @param parameter Parameter to pass to the function
+ * @param result_value  value returned back to the user
+ * @param error_msg error message if fails, empty if success
+ * @return KVTError::SUCCESS if successful, appropriate error code otherwise
+ */
+KVTError kvt_update(uint64_t tx_id, 
+    uint64_t table_id,
+    const std::string& key,
+    KVUpdateFunc & func,
+    const std::string& parameter,
+    std::string& result_value,
+    std::string& error_msg);
+
+/**
+* @param tx_id Transaction ID (0 for auto-commit/one-shot operation)
+* @param table_id ID of the table
+* @param key_start Start of key range (inclusive)
+* @param key_end End of key range (exclusive)
+* @param num_item_limit Maximum number of items to return
+* @param func Function to update the value
+* @param parameter Parameter to pass to the function
+* @param results Output parameter for key-value pairs found
+* @param error_msg error message if fails, empty if success
+* @return KVTError::SUCCESS if successful, appropriate error code otherwise
+*/
+KVTError kvt_range_update(uint64_t tx_id, 
+        uint64_t table_id,
+        const std::string& key_start,
+        const std::string& key_end,
+        size_t num_item_limit,
+        KVUpdateFunc & func,
+        const std::string& parameter,
+        std::vector<std::pair<std::string, std::string>>& results,
+        std::string& error_msg);
+
+
 /**
  * Commit a transaction, making all changes permanent.
  * @param tx_id Transaction ID to commit
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
+
 KVTError kvt_commit_transaction(uint64_t tx_id, 
                                 std::string& error_msg);
 
 /**
  * Rollback/abort a transaction, discarding all changes.
  * @param tx_id Transaction ID to rollback
- * @param error_msg Output parameter for error message if operation fails
+ * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
 KVTError kvt_rollback_transaction(uint64_t tx_id, 
                                   std::string& error_msg);
+
 
 #endif // KVT_INC_H

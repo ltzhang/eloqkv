@@ -23,6 +23,7 @@
 #include "tx_service/include/catalog_factory.h"
 #include "tx_service/include/tx_service.h"
 #include "tx_service/include/tx_command.h"
+#include "kvt_inc.h"
 
 // Forward declarations for tx_service components
 namespace txservice {
@@ -76,8 +77,8 @@ public:
                         brpc::RedisReply *output);
     
     // Initialize the manager with transaction service dependencies
-    void initialize(txservice::TxService* tx_service, 
-                   txservice::CatalogFactory* catalog_factory);
+    void initialize(txservice::TxService* tx_service = nullptr, 
+                   txservice::CatalogFactory* catalog_factory = nullptr);
     
     // Cleanup and shutdown  
     void shutdown();
@@ -106,6 +107,20 @@ public:
                 const std::string& key_start, const std::string& key_end, size_t num_item_limit, 
                 std::vector<std::pair<std::string, std::string>>& results,
                 std::string& error_msg);
+
+    bool doUpdate(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+                KVUpdateFunc & func, const std::string& parameter, std::string& result_value, std::string& error_msg){
+                    assert(0 && "Not Implemented Yet");
+                    return false;
+                }
+
+    bool doRangeUpdate(uint64_t tx_id, uint64_t table_id, const std::string& key_start, const std::string& key_end, size_t num_item_limit, 
+                KVUpdateFunc & func, const std::string& parameter, std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg)
+                {
+                    assert(0 && "Not Implemented Yet");
+                    return false;
+                }
+
     bool doCommitTx(uint64_t tx_id, std::string& error_msg);
     bool doAbortTx(uint64_t tx_id, std::string& error_msg);
 
