@@ -1368,6 +1368,9 @@ KVTError KVTMemManagerOCC::scan(uint64_t tx_id, uint64_t table_id, const std::st
             results_table[itr->first] = itr->second.data;
         } else {
             if (tx->read_set[table_key].data != itr->second.data) {
+                //if my value is not the same as the table, table value is newer, so my version must be older
+                //actually we should abort here, but we just assert for now. since we are not supposed to
+                //read from table in real implementations. 
                 assert (tx->read_set[table_key].metadata < itr->second.metadata);
             }
             results_table[itr->first] = tx->read_set[table_key].data; //should be the same, if not, then we will abort anyway.
