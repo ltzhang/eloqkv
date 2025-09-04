@@ -1,9 +1,22 @@
-#include "kvt_mem.h"
-#include <algorithm>
+#include <algorithm>      
 #include <stdexcept>
+#include <iostream>
+#include "kvt_mem.h"    
 
 // Global KVT manager instance
 std::unique_ptr<KVTWrapper> g_kvt_manager;
+int g_verbosity = 0;
+int g_sanity_check_level = 0;
+
+KVTError kvt_set_verbosity(int verbosity) {
+    g_verbosity = verbosity;
+    return KVTError::SUCCESS;
+}
+
+KVTError kvt_set_sanity_check_level(int level) {
+    g_sanity_check_level = level;
+    return KVTError::SUCCESS;
+}
 
 // Global KVT interface functions
 KVTError kvt_initialize() {
@@ -23,103 +36,103 @@ void kvt_shutdown() {
 }
 
 KVTError kvt_create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_create_table: table_name=" << table_name << ", partition_method=" << partition_method);
+    VERBOSE(std::cout << "kvt_create_table: table_name=" << table_name << ", partition_method=" << partition_method);
     KVTError result = g_kvt_manager->create_table(table_name, partition_method, table_id, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS, table_id=" << table_id << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS, table_id=" << table_id << std::endl);
     }
     return result;
 }
 
 KVTError kvt_drop_table(uint64_t table_id, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_drop_table: table_id=" << table_id);
+    VERBOSE(std::cout << "kvt_drop_table: table_id=" << table_id);
     KVTError result = g_kvt_manager->drop_table(table_id, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS" << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS" << std::endl);
     }
     return result;
 }
 
 KVTError kvt_get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_get_table_name: table_id=" << table_id);
+    VERBOSE(std::cout << "kvt_get_table_name: table_id=" << table_id);
     KVTError result = g_kvt_manager->get_table_name(table_id, table_name, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS, table_name=" << table_name << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS, table_name=" << table_name << std::endl);
     }
     return result;
 }
 
 KVTError kvt_get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_get_table_id: table_name=" << table_name);
+    VERBOSE(std::cout << "kvt_get_table_id: table_name=" << table_name);
     KVTError result = g_kvt_manager->get_table_id(table_name, table_id, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS, table_id=" << table_id << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS, table_id=" << table_id << std::endl);
     }
     return result;
 }
 
 KVTError kvt_list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_list_tables");
+    VERBOSE(std::cout << "kvt_list_tables");
     KVTError result = g_kvt_manager->list_tables(results, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS, count=" << results.size() << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS, count=" << results.size() << std::endl);
     }
     return result;
 }
 
 KVTError kvt_start_transaction(uint64_t& tx_id, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_start_transaction");
+    VERBOSE(std::cout << "kvt_start_transaction");
     KVTError result = g_kvt_manager->start_transaction(tx_id, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS, tx_id=" << tx_id << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS, tx_id=" << tx_id << std::endl);
     }
     return result;
 }
 
 KVTError kvt_get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
              std::string& value, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_get: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
+    VERBOSE(std::cout << "kvt_get: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
     KVTError result = g_kvt_manager->get(tx_id, table_id, key, value, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS, value=" << value << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS, value=" << value << std::endl);
     }
     return result;
 }
 
 KVTError kvt_set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
              const std::string& value, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_set: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key << ", value=" << value);
+    VERBOSE(std::cout << "kvt_set: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key << ", value=" << value);
     KVTError result = g_kvt_manager->set(tx_id, table_id, key, value, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS" << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS" << std::endl);
     }
     return result;
 }
 
 KVTError kvt_del(uint64_t tx_id, uint64_t table_id, const std::string& key, 
              std::string& error_msg) {
-    DEBUG(std::cout << "kvt_del: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
+    VERBOSE(std::cout << "kvt_del: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
     KVTError result = g_kvt_manager->del(tx_id, table_id, key, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS" << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS" << std::endl);
     }
     return result;
 }
@@ -127,46 +140,46 @@ KVTError kvt_del(uint64_t tx_id, uint64_t table_id, const std::string& key,
 KVTError kvt_scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
               const std::string& key_end, size_t num_item_limit, 
               std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_scan: tx_id=" << tx_id << ", table_id=" << table_id << ", key_start=" << key_start << ", key_end=" << key_end << ", limit=" << num_item_limit);
+    VERBOSE(std::cout << "kvt_scan: tx_id=" << tx_id << ", table_id=" << table_id << ", key_start=" << key_start << ", key_end=" << key_end << ", limit=" << num_item_limit);
     KVTError result = g_kvt_manager->scan(tx_id, table_id, key_start, key_end, num_item_limit, results, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS, count=" << results.size() << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS, count=" << results.size() << std::endl);
     }
     return result;
 }
 
 KVTError kvt_commit_transaction(uint64_t tx_id, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_commit_transaction: tx_id=" << tx_id);
+    VERBOSE(std::cout << "kvt_commit_transaction: tx_id=" << tx_id);
     KVTError result = g_kvt_manager->commit_transaction(tx_id, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS" << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS" << std::endl);
     }
     return result;
 }
 
 KVTError kvt_rollback_transaction(uint64_t tx_id, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_rollback_transaction: tx_id=" << tx_id);
+    VERBOSE(std::cout << "kvt_rollback_transaction: tx_id=" << tx_id);
     KVTError result = g_kvt_manager->rollback_transaction(tx_id, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS" << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS" << std::endl);
     }
     return result;
 }
 
 KVTError kvt_batch_execute(uint64_t tx_id, const KVTBatchOps& batch_ops, 
                           KVTBatchResults& batch_results, std::string& error_msg) {
-    DEBUG(std::cout << "kvt_batch_execute: tx_id=" << tx_id << ", ops_count=" << batch_ops.size());
+    VERBOSE(std::cout << "kvt_batch_execute: tx_id=" << tx_id << ", ops_count=" << batch_ops.size());
     KVTError result = g_kvt_manager->batch_execute(tx_id, batch_ops, batch_results, error_msg);
     if (result != KVTError::SUCCESS) {
-        DEBUG(std::cout << " -> ERROR: " << error_msg << std::endl);
+        VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
-        DEBUG(std::cout << " -> SUCCESS, results_count=" << batch_results.size() << std::endl);
+        VERBOSE(std::cout << " -> SUCCESS, results_count=" << batch_results.size() << std::endl);
     }
     return result;
 }
@@ -726,7 +739,7 @@ KVTError KVTMemManager2PL::commit_transaction(uint64_t tx_id, std::string& error
             } else {
                 // This shouldn't happen - we should have created a placeholder
                 // But handle it just in case
-                std::cout << "  DEBUG: Creating new entry key=" << key << " value=" << entry.data << std::endl;
+                std::cout << "  VERBOSE: Creating new entry key=" << key << " value=" << entry.data << std::endl;
                 table->data[key] = Entry(entry.data, 0);
             }
         }

@@ -1,3 +1,4 @@
+#include "eloq_kvt/kvt_inc.h"
 #include "kvt_inc.h"
 #include "kvt_manager.h"
 #include <iostream>
@@ -135,8 +136,19 @@ private:
 
 // Global instance
 std::unique_ptr<KVTManagerWrapper> g_kvt_manager;
+int g_verbosity = 0;
+int g_sanity_check_level = 0;
 
 // Implementation of public API functions
+KVTError kvt_set_sanity_check_level(int level) {
+    g_sanity_check_level = level;
+    return KVTError::SUCCESS;
+}
+
+KVTError kvt_set_verbosity(int verbosity) {
+    g_verbosity = verbosity;
+    return KVTError::SUCCESS;
+}
 
 KVTError kvt_initialize() {
     try {

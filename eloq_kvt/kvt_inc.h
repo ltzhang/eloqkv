@@ -5,10 +5,6 @@
 #include <vector>
 #include <utility>
 #include <cstdint>
-#include <memory>
-
-// Forward declaration - implementation hidden
-class KVTManagerWrapper;
 
 /**
  * KVT Error Codes
@@ -16,7 +12,7 @@ class KVTManagerWrapper;
  * Enumeration of all possible error conditions in the KVT system.
  * SUCCESS indicates successful operation, all other values indicate errors.
  */
-enum class KVTError {
+ enum class KVTError {
     SUCCESS = 0,                           // Operation completed successfully
     KVT_NOT_INITIALIZED,                   // KVT system not initialized
     TABLE_ALREADY_EXISTS,                  // Table with given name already exists
@@ -44,19 +40,24 @@ enum KVT_OPType //for batch operations
 
 struct KVTOp
 {
-    KVT_OPType op;  //operation type
+    enum KVT_OPType op;
     uint64_t table_id;  //table ID instead of table name
     std::string key;
     std::string value;
 }; 
+
 struct KVTOpResult
 {
-    KVTError error;     //error code for each operation
-    std::string value;  //only valide for get operation
+    KVTError error;
+    std::string value; //only valid for get operation
 }; 
 
 typedef std::vector<KVTOp> KVTBatchOps;
 typedef std::vector<KVTOpResult> KVTBatchResults;
+
+
+// Forward declaration - implementation hidden
+class KVTManagerWrapper;
 
 /**
  * KVT (Key-Value Transaction) API
@@ -91,6 +92,20 @@ typedef std::vector<KVTOpResult> KVTBatchResults;
  * }
  * ```
  */
+
+
+ /**
+ * Set the verbosity of the KVT system. 0 ~ 3: 0 (none), 1 (warnings), 2 (information), 3 (detailed tracing)
+ * @return KVTError::SUCCESS
+ */
+KVTError kvt_set_verbosity(int verbosity); 
+
+ /**
+ * Set the sanity check level of the KVT system.
+ * @param level Sanity check level: 0 (none), 1 (basic), 2 (detailed), 3 (very detailed)
+ * @return KVTError::SUCCESS 
+ */
+KVTError kvt_set_sanity_check_level(int level); 
 
 /**
  * Initialize the KVT system.

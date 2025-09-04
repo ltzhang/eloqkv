@@ -9,60 +9,32 @@
 #include <memory>
 #include <cstdint>
 #include <cassert>
-#include <iostream>
 #include <algorithm>
+#include "kvt_inc.h"
 
-#define DEBUG(x) {x;}
-//#define DEBUG(x) {}
+extern int g_verbosity;
+extern int g_sanity_check_level;
 
-/**
- * KVT Error Codes
- * 
- * Enumeration of all possible error conditions in the KVT system.
- * SUCCESS indicates successful operation, all other values indicate errors.
- */
-enum class KVTError {
-    SUCCESS = 0,                           // Operation completed successfully
-    KVT_NOT_INITIALIZED,                   // KVT system not initialized
-    TABLE_ALREADY_EXISTS,                  // Table with given name already exists
-    TABLE_NOT_FOUND,                       // Table with given name does not exist
-    INVALID_PARTITION_METHOD,              // Partition method is not "hash" or "range"
-    TRANSACTION_NOT_FOUND,                 // Transaction with given ID does not exist
-    TRANSACTION_ALREADY_RUNNING,           // Another transaction is already running
-    KEY_NOT_FOUND,                         // Key does not exist in the table
-    KEY_IS_DELETED,                        // Key was deleted in the current transaction
-    KEY_IS_LOCKED,                         // Key is locked by another transaction (2PL)
-    TRANSACTION_HAS_STALE_DATA,            // OCC validation failed due to concurrent modifications
-    ONE_SHOT_WRITE_NOT_ALLOWED,           // Write operations require an active transaction
-    ONE_SHOT_DELETE_NOT_ALLOWED,          // Delete operations require an active transaction
-    BATCH_NOT_FULLY_SUCCESS,               // Some operations succeeded, some failed
-    UNKNOWN_ERROR                          // Unknown or unexpected error
-};
+#if 1
+    #define VERBOSE(x) {if (g_verbosity > 0) {x;}}
+    #define VERBOSE1(x) {if (g_verbosity > 1) {x;}}
+    #define VERBOSE2(x) {if (g_verbosity > 2) {x;}}
+#else 
+    #define VERBOSE(x) {}
+    #define VERBOSE1(x) {}
+    #define VERBOSE2(x) {}
+#endif
 
-enum KVT_OPType //for batch operations
-{
-    OP_UNKNOWN,
-    OP_GET,
-    OP_SET,
-    OP_DEL,
-};
+#if 1
+    #define CHECK(x) {if (g_sanity_check_level > 0) {x;}}
+    #define CHECK1(x) {if (g_sanity_check_level > 1) {x;}}
+    #define CHECK2(x) {if (g_sanity_check_level > 2) {x;}}
+#else 
+    #define CHECK(x) {}
+    #define CHECK1(x) {}
+    #define CHECK2(x) {}
+#endif
 
-struct KVTOp
-{
-    enum KVT_OPType op;
-    uint64_t table_id;  //table ID instead of table name
-    std::string key;
-    std::string value;
-}; 
-
-struct KVTOpResult
-{
-    KVTError error;
-    std::string value; //only valid for get operation
-}; 
-
-typedef std::vector<KVTOp> KVTBatchOps;
-typedef std::vector<KVTOpResult> KVTBatchResults;
 
 class KVTWrapper
 {
