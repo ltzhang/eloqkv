@@ -289,7 +289,7 @@ uint64_t KVTManager::doStartTx(std::string& error_msg) {
     // Use default isolation level and concurrency control protocol
     txservice::TransactionExecution* txm = newTxm(
         txservice::IsolationLevel::ReadCommitted,
-        txservice::CcProtocol::OccRead
+        txservice::CcProtocol::OCC
     );
     
     if (!txm) {
@@ -319,7 +319,7 @@ bool KVTManager::doGet(uint64_t tx_id, uint64_t table_id, const std::string& key
     
     if (auto_commit) {
         // Create one-shot transaction for auto-commit
-        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::OccRead);
+        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::OCC);
         if (!txm) {
             error_msg = "Failed to create transaction for GET";
             return false;
@@ -372,7 +372,6 @@ bool KVTManager::doGet(uint64_t tx_id, uint64_t table_id, const std::string& key
     // Add table name as prefix to distinguish between different KVT tables
     std::string prefixed_key = table->name() + ":" + key;
     EloqStringKey key_obj(prefixed_key.data(), prefixed_key.size());
-    std::cout << "GET key: " << prefixed_key << std::endl;
     TxKey tx_key(&key_obj);
     EloqStringRecord record;
     ReadTxRequest read_req(
@@ -390,7 +389,10 @@ bool KVTManager::doGet(uint64_t tx_id, uint64_t table_id, const std::string& key
     }   
     rec_status= read_req.Result().first;
     if (rec_status == RecordStatus::Deleted) {
-        error_msg = "Key " + key + " not found";
+        error_msg = "Key not found";
+        if (auto_commit) {
+            txservice::AbortTx(txm);
+        }
         return false;
     }
     value = record.ToString();
@@ -426,7 +428,7 @@ bool KVTManager::doSet(uint64_t tx_id, uint64_t table_id,
     
     if (auto_commit) {
         // Create one-shot transaction for auto-commit
-        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::OccRead);
+        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::OCC);
         if (!txm) {
             error_msg = "Failed to create transaction for SET";
             return false;
@@ -548,7 +550,7 @@ bool KVTManager::doScan(uint64_t tx_id, uint64_t table_id,
     
     if (auto_commit) {
         // Create one-shot transaction for auto-commit
-        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::OccRead);
+        txm = newTxm(txservice::IsolationLevel::ReadCommitted, txservice::CcProtocol::OCC);
         if (!txm) {
             error_msg = "Failed to create transaction for scan";
             return false;
@@ -761,7 +763,6 @@ bool KVTManager::doCommitTx(uint64_t tx_id, std::string& error_msg) {
     // Remove from active transactions only on successful commit
     active_transactions_.erase(tx_id);
     
-    //std::cout << "Committed transaction " << tx_id << std::endl;
     return true;
 }
 
