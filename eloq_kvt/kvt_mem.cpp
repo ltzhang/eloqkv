@@ -1147,8 +1147,8 @@ KVTError KVTMemManagerOCC::commit_transaction(uint64_t tx_id, std::string& error
         Table* table = get_table_by_id(table_id_parsed);
         assert(table);
         auto itr = table->data.find(key);
-        assert (itr != table->data.end());
-        table->data.erase(itr);
+        if (itr != table->data.end()) //not found could happen, if the key is first written then delete and never hit the table.
+            table->data.erase(itr);
     }
     for (const auto& write_pair : tx->write_set) {
         auto [table_id_parsed, key] = parse_table_key(write_pair.first);
