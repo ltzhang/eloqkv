@@ -7,6 +7,38 @@
 #include <cstdint>
 #include <functional>
 
+class KVTKey : public std::string {
+public:
+    KVTKey() : std::string() {}
+    KVTKey(const char* s) : std::string(s) {}
+    KVTKey(const std::string& s) : std::string(s) {}
+    KVTKey(std::string&& s) : std::string(std::move(s)) {}
+    template<typename InputIterator> KVTKey(InputIterator first, InputIterator last) : std::string(first, last) {}
+    KVTKey& operator=(const char* s) { std::string::operator=(s); return *this; }
+    KVTKey& operator=(const std::string& s) { std::string::operator=(s); return *this; }
+    KVTKey& operator=(std::string&& s) { std::string::operator=(std::move(s)); return *this; }
+    bool operator<=(const KVTKey& other) const { return *this < other || *this == other; }
+    bool operator>(const KVTKey& other) const { return other < *this; }
+    bool operator>=(const KVTKey& other) const { return other < *this || *this == other; }
+    bool operator==(const KVTKey& other) const { return static_cast<const std::string&>(*this) == static_cast<const std::string&>(other); }
+    bool operator!=(const KVTKey& other) const { return !(*this == other); }
+
+    //these are for scan operations
+    //key cannot be null, so 0x00 is the smallest key possible
+    //We do not allow empty string as key, so we use empty string as the largest key possible
+    static KVTKey minimum_key() { return KVTKey(std::string(1, '\0'));}
+    static KVTKey maximum_key() { return KVTKey("");}
+    bool operator<(const KVTKey& other) const { 
+        if (empty() && !other.empty()) return false;  // empty is larger
+        if (!empty() && other.empty()) return true;   // other is larger
+        return static_cast<const std::string&>(*this) < static_cast<const std::string&>(other); 
+    }
+};
+
+namespace std {
+    template<> struct hash<KVTKey> { std::size_t operator()(const KVTKey& key) const { return std::hash<std::string>()(static_cast<const std::string&>(key)); } };
+}
+
 /**
  * KVT Error Codes
  * 
@@ -52,7 +84,7 @@ struct KVTOp
 {
     enum KVT_OPType op;
     uint64_t table_id;  //table ID instead of table name
-    std::string key;
+    KVTKey key;
     std::string value;
 }; 
 
@@ -203,7 +235,7 @@ KVTError kvt_start_transaction(uint64_t& tx_id,
  */
 KVTError kvt_get(uint64_t tx_id, 
                 uint64_t table_id,
-                const std::string& key,
+                const KVTKey& key,
                 std::string& value,
                 std::string& error_msg);
 
@@ -218,7 +250,7 @@ KVTError kvt_get(uint64_t tx_id,
  */
 KVTError kvt_set(uint64_t tx_id,
                 uint64_t table_id,
-                const std::string& key,
+                const KVTKey& key,
                 const std::string& value,
                 std::string& error_msg);
 
@@ -232,7 +264,7 @@ KVTError kvt_set(uint64_t tx_id,
  */
 KVTError kvt_del(uint64_t tx_id, 
                 uint64_t table_id,
-                const std::string& key,
+                const KVTKey& key,
                 std::string& error_msg);
 
 /**
@@ -248,10 +280,10 @@ KVTError kvt_del(uint64_t tx_id,
  */
 KVTError kvt_scan(uint64_t tx_id,
                 uint64_t table_id,
-                const std::string& key_start,
-                const std::string& key_end,
+                const KVTKey& key_start,
+                const KVTKey& key_end,
                 size_t num_item_limit,
-                std::vector<std::pair<std::string, std::string>>& results,
+                std::vector<std::pair<KVTKey, std::string>>& results,
                 std::string& error_msg);
 
 /**
@@ -274,7 +306,7 @@ KVTError kvt_batch_execute(uint64_t tx_id,
 //second return value mark if we need to update the value in the table
 //third return value mark if we need to return the value to the user. 
 typedef std::function<std::tuple<bool /*success*/, bool /*update value*/, bool /* return value*/ > (
-    const std::string& /* key */, 
+    const KVTKey& /* key */, 
     const std::string& /* original value*/, 
     const std::string& /* parameter value*/, 
     std::string& /*new value to be set*/, 
@@ -293,7 +325,7 @@ typedef std::function<std::tuple<bool /*success*/, bool /*update value*/, bool /
  */
 KVTError kvt_update(uint64_t tx_id, 
     uint64_t table_id,
-    const std::string& key,
+    const KVTKey& key,
     KVUpdateFunc & func,
     const std::string& parameter,
     std::string& result_value,
@@ -314,12 +346,12 @@ KVTError kvt_update(uint64_t tx_id,
 */
 KVTError kvt_range_update(uint64_t tx_id, 
         uint64_t table_id,
-        const std::string& key_start,
-        const std::string& key_end,
+        const KVTKey& key_start,
+        const KVTKey& key_end,
         size_t num_item_limit,
         KVUpdateFunc & func,
         const std::string& parameter,
-        std::vector<std::pair<std::string, std::string>>& results,
+        std::vector<std::pair<KVTKey, std::string>>& results,
         std::string& error_msg);
 
 

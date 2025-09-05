@@ -52,18 +52,18 @@ class KVTWrapper
         virtual KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) = 0;
         virtual KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) = 0;
         // Data operations  
-        virtual KVTError get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+        virtual KVTError get(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
                  std::string& value, std::string& error_msg) = 0;
-        virtual KVTError set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+        virtual KVTError set(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
                  const std::string& value, std::string& error_msg) = 0;
         virtual KVTError del(uint64_t tx_id, uint64_t table_id, 
-                const std::string& key, std::string& error_msg) = 0;
+                const KVTKey& key, std::string& error_msg) = 0;
         // Scan keys in range [key_start, key_end) - key_start inclusive, key_end exclusive
-        virtual KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
-                  const std::string& key_end, size_t num_item_limit, 
-                  std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) = 0;
+        virtual KVTError scan(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
+                  const KVTKey& key_end, size_t num_item_limit, 
+                  std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg) = 0;
 
-        virtual KVTError update(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+        virtual KVTError update(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
                  KVUpdateFunc & func, const std::string& parameter, std::string& result_value, std::string& error_msg)
                 {
                     std::string orig_value;
@@ -85,12 +85,12 @@ class KVTWrapper
                     return KVTError::SUCCESS;
                                  
                 }
-        virtual KVTError range_update(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
-                  const std::string& key_end, size_t num_item_limit, 
-                  KVUpdateFunc & func, const std::string& parameter, std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg)
+        virtual KVTError range_update(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
+                  const KVTKey& key_end, size_t num_item_limit, 
+                  KVUpdateFunc & func, const std::string& parameter, std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg)
                 {
-                    std::vector<std::pair<std::string, std::string>> temp_results;
-                    std::string new_sart_key;
+                    std::vector<std::pair<KVTKey, std::string>> temp_results;
+                    KVTKey new_sart_key;
                     new_sart_key = key_start;
                     KVTError r_scan = KVTError::UNKNOWN_ERROR;
                     while (results.size() < num_item_limit) {
@@ -177,35 +177,53 @@ class KVTWrapper
 class KVTMemManagerNoCC : public KVTWrapper
 {
     private:
-        std::map<std::string, std::string> table_data;
+        std::map<KVTKey, std::string> table_data;
         std::unordered_map<std::string, uint32_t> table_to_id;
         uint64_t next_table_id;
         uint64_t next_tx_id;
         std::mutex global_mutex;
 
-        std::string make_table_key(uint64_t table_id, const std::string& key) {
-            std::string result;
-            result.resize(8 + key.size());
-            // Write table_id as 8 bytes (little-endian)
-            for (int i = 0; i < 8; ++i) {
-                result[i] = static_cast<char>((table_id >> (i * 8)) & 0xFF);
+        KVTKey make_table_key(uint64_t table_id, const KVTKey& key) {
+            KVTKey result;
+            if (key.empty()) {
+                // Special case: empty key (maximum key) is encoded as table_id + 1
+                // This ensures empty keys are treated as largest in standard string comparison
+                result.resize(8);
+                uint64_t encoded_table_id = table_id + 1;
+                for (int i = 0; i < 8; ++i) {
+                    result[i] = static_cast<char>((encoded_table_id >> (i * 8)) & 0xFF);
+                }
+            } else {
+                result.resize(8 + key.size());
+                // Write table_id as 8 bytes (little-endian)
+                for (int i = 0; i < 8; ++i) {
+                    result[i] = static_cast<char>((table_id >> (i * 8)) & 0xFF);
+                }
+                // Copy key after the table_id
+                std::copy(key.begin(), key.end(), result.begin() + 8);
             }
-            // Copy key after the table_id
-            std::copy(key.begin(), key.end(), result.begin() + 8);
             return result;
         }
-        std::pair<uint64_t, std::string> parse_table_key(const std::string& table_key) {
+        std::pair<uint64_t, KVTKey> parse_table_key(const KVTKey& table_key) {
             if (table_key.size() < 8) {
-                return std::make_pair(0, "");
+                return std::make_pair(0, KVTKey());
             }
             // Read table_id from first 8 bytes (little-endian)
-            uint64_t table_id = 0;
+            uint64_t encoded_table_id = 0;
             for (int i = 0; i < 8; ++i) {
-                table_id |= static_cast<uint64_t>(static_cast<unsigned char>(table_key[i])) << (i * 8);
+                encoded_table_id |= static_cast<uint64_t>(static_cast<unsigned char>(table_key[i])) << (i * 8);
             }
-            // Extract key (everything after the 8-byte table_id)
-            std::string key(table_key.begin() + 8, table_key.end());
-            return std::make_pair(table_id, key);
+            
+            if (table_key.size() == 8) {
+                // Special case: 8-byte key indicates empty key (maximum key)
+                // Decode by subtracting 1 from the encoded table_id
+                uint64_t table_id = encoded_table_id - 1;
+                return std::make_pair(table_id, KVTKey());
+            } else {
+                // Normal case: extract key (everything after the 8-byte table_id)
+                KVTKey key(table_key.begin() + 8, table_key.end());
+                return std::make_pair(encoded_table_id, key);
+            }
         }
     public:
         KVTMemManagerNoCC()
@@ -226,56 +244,74 @@ class KVTMemManagerNoCC : public KVTWrapper
         KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) override;
         KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) override;
         // Data operations  
-        KVTError get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+        KVTError get(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
                  std::string& value, std::string& error_msg) override;
-        KVTError set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+        KVTError set(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
                  const std::string& value, std::string& error_msg) override;
         KVTError del(uint64_t tx_id, uint64_t table_id, 
-                const std::string& key, std::string& error_msg) override;
-        KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
-                  const std::string& key_end, size_t num_item_limit, 
-                  std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) override;
+                const KVTKey& key, std::string& error_msg) override;
+        KVTError scan(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
+                  const KVTKey& key_end, size_t num_item_limit, 
+                  std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg) override;
     }                  
 ;
 
 class KVTMemManagerSimple : public KVTWrapper
 {
     private:
-        std::map<std::string, std::string> table_data;
+        std::map<KVTKey, std::string> table_data;
         std::unordered_map<std::string, uint32_t> table_to_id;
         uint64_t next_table_id;
         uint64_t next_tx_id;
         uint64_t current_tx_id;
         std::mutex global_mutex;
         //helper
-        std::string make_table_key(uint64_t table_id, const std::string& key) {
-            std::string result;
-            result.resize(8 + key.size());
-            // Write table_id as 8 bytes (little-endian)
-            for (int i = 0; i < 8; ++i) {
-                result[i] = static_cast<char>((table_id >> (i * 8)) & 0xFF);
+        KVTKey make_table_key(uint64_t table_id, const KVTKey& key) {
+            KVTKey result;
+            if (key.empty()) {
+                // Special case: empty key (maximum key) is encoded as table_id + 1
+                // This ensures empty keys are treated as largest in standard string comparison
+                result.resize(8);
+                uint64_t encoded_table_id = table_id + 1;
+                for (int i = 0; i < 8; ++i) {
+                    result[i] = static_cast<char>((encoded_table_id >> (i * 8)) & 0xFF);
+                }
+            } else {
+                result.resize(8 + key.size());
+                // Write table_id as 8 bytes (little-endian)
+                for (int i = 0; i < 8; ++i) {
+                    result[i] = static_cast<char>((table_id >> (i * 8)) & 0xFF);
+                }
+                // Copy key after the table_id
+                std::copy(key.begin(), key.end(), result.begin() + 8);
             }
-            // Copy key after the table_id
-            std::copy(key.begin(), key.end(), result.begin() + 8);
             return result;
         }
-        std::pair<uint64_t, std::string> parse_table_key(const std::string& table_key) {
+        std::pair<uint64_t, KVTKey> parse_table_key(const KVTKey& table_key) {
             if (table_key.size() < 8) {
-                return std::make_pair(0, "");
+                return std::make_pair(0, KVTKey());
             }
             // Read table_id from first 8 bytes (little-endian)
-            uint64_t table_id = 0;
+            uint64_t encoded_table_id = 0;
             for (int i = 0; i < 8; ++i) {
-                table_id |= static_cast<uint64_t>(static_cast<unsigned char>(table_key[i])) << (i * 8);
+                encoded_table_id |= static_cast<uint64_t>(static_cast<unsigned char>(table_key[i])) << (i * 8);
             }
-            // Extract key (everything after the 8-byte table_id)
-            std::string key(table_key.begin() + 8, table_key.end());
-            return std::make_pair(table_id, key);
+            
+            if (table_key.size() == 8) {
+                // Special case: 8-byte key indicates empty key (maximum key)
+                // Decode by subtracting 1 from the encoded table_id
+                uint64_t table_id = encoded_table_id - 1;
+                return std::make_pair(table_id, KVTKey());
+            } else {
+                // Normal case: extract key (everything after the 8-byte table_id)
+                KVTKey key(table_key.begin() + 8, table_key.end());
+                return std::make_pair(encoded_table_id, key);
+            }
         }
 
 
-        std::map<std::string, std::string> write_set; 
-        std::unordered_set<std::string> delete_set;
+        std::map<KVTKey, std::string> write_set; 
+        std::unordered_set<KVTKey> delete_set;
 
     public:
         KVTMemManagerSimple()
@@ -297,15 +333,15 @@ class KVTMemManagerSimple : public KVTWrapper
         KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) override;
         KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) override;
         // Data operations  
-        KVTError get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+        KVTError get(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
                  std::string& value, std::string& error_msg) override;
-        KVTError set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+        KVTError set(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
                  const std::string& value, std::string& error_msg) override;
         KVTError del(uint64_t tx_id, uint64_t table_id, 
-                const std::string& key, std::string& error_msg) override;
-        KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
-                  const std::string& key_end, size_t num_item_limit, 
-                  std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) override;
+                const KVTKey& key, std::string& error_msg) override;
+        KVTError scan(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
+                  const KVTKey& key_end, size_t num_item_limit, 
+                  std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg) override;
 };
 
 
@@ -324,16 +360,16 @@ class KVTMemManagerBase : public KVTWrapper
             uint64_t id;
             std::string name;
             std::string partition_method;  // "hash" or "range"
-            std::map<std::string, Entry> data;
+            std::map<KVTKey, Entry> data;
             
             Table(const std::string& n, const std::string& pm, uint64_t i) : name(n), partition_method(pm), id(i) {}
         };
 
         struct Transaction {
             uint64_t tx_id;
-            std::map<std::string, Entry> read_set;    // table_key -> Value (for reads)
-            std::map<std::string, Entry> write_set;   // table_key -> Value (for writes)
-            std::unordered_set<std::string> delete_set; // table_key -> deleted
+            std::map<KVTKey, Entry> read_set;    // table_key -> Value (for reads)
+            std::map<KVTKey, Entry> write_set;   // table_key -> Value (for writes)
+            std::unordered_set<KVTKey> delete_set; // table_key -> deleted
             
             Transaction(uint64_t id) : tx_id(id) {}
         };
@@ -347,30 +383,48 @@ class KVTMemManagerBase : public KVTWrapper
         uint64_t next_tx_id;
 
         //helper
-        std::string make_table_key(uint64_t table_id, const std::string& key) {
-            std::string result;
-            result.resize(8 + key.size());
-            // Write table_id as 8 bytes (little-endian)
-            for (int i = 0; i < 8; ++i) {
-                result[i] = static_cast<char>((table_id >> (i * 8)) & 0xFF);
+        KVTKey make_table_key(uint64_t table_id, const KVTKey& key) {
+            KVTKey result;
+            if (key.empty()) {
+                // Special case: empty key (maximum key) is encoded as table_id + 1
+                // This ensures empty keys are treated as largest in standard string comparison
+                result.resize(8);
+                uint64_t encoded_table_id = table_id + 1;
+                for (int i = 0; i < 8; ++i) {
+                    result[i] = static_cast<char>((encoded_table_id >> (i * 8)) & 0xFF);
+                }
+            } else {
+                result.resize(8 + key.size());
+                // Write table_id as 8 bytes (little-endian)
+                for (int i = 0; i < 8; ++i) {
+                    result[i] = static_cast<char>((table_id >> (i * 8)) & 0xFF);
+                }
+                // Copy key after the table_id
+                std::copy(key.begin(), key.end(), result.begin() + 8);
             }
-            // Copy key after the table_id
-            std::copy(key.begin(), key.end(), result.begin() + 8);
             return result;
         }
 
-        std::pair<uint64_t, std::string> parse_table_key(const std::string& table_key) {
+        std::pair<uint64_t, KVTKey> parse_table_key(const KVTKey& table_key) {
             if (table_key.size() < 8) {
-                return std::make_pair(0, "");
+                return std::make_pair(0, KVTKey());
             }
             // Read table_id from first 8 bytes (little-endian)
-            uint64_t table_id = 0;
+            uint64_t encoded_table_id = 0;
             for (int i = 0; i < 8; ++i) {
-                table_id |= static_cast<uint64_t>(static_cast<unsigned char>(table_key[i])) << (i * 8);
+                encoded_table_id |= static_cast<uint64_t>(static_cast<unsigned char>(table_key[i])) << (i * 8);
             }
-            // Extract key (everything after the 8-byte table_id)
-            std::string key(table_key.begin() + 8, table_key.end());
-            return std::make_pair(table_id, key);
+            
+            if (table_key.size() == 8) {
+                // Special case: 8-byte key indicates empty key (maximum key)
+                // Decode by subtracting 1 from the encoded table_id
+                uint64_t table_id = encoded_table_id - 1;
+                return std::make_pair(table_id, KVTKey());
+            } else {
+                // Normal case: extract key (everything after the 8-byte table_id)
+                KVTKey key(table_key.begin() + 8, table_key.end());
+                return std::make_pair(encoded_table_id, key);
+            }
         }
 
         Table* get_table(const std::string& table_name) {
@@ -504,15 +558,15 @@ public:
     KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) override;
     KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) override;
     // Data operations  
-    KVTError get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+    KVTError get(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
                 std::string& value, std::string& error_msg) override;
-    KVTError set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+    KVTError set(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
                 const std::string& value, std::string& error_msg) override;
     KVTError del(uint64_t tx_id, uint64_t table_id, 
-            const std::string& key, std::string& error_msg) override;
-    KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
-                const std::string& key_end, size_t num_item_limit, 
-                std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) override;
+            const KVTKey& key, std::string& error_msg) override;
+    KVTError scan(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
+                const KVTKey& key_end, size_t num_item_limit, 
+                std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg) override;
 };
 
 
@@ -531,15 +585,15 @@ public:
     KVTError commit_transaction(uint64_t tx_id, std::string& error_msg) override;
     KVTError rollback_transaction(uint64_t tx_id, std::string& error_msg) override;
     // Data operations  
-    KVTError get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+    KVTError get(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
                 std::string& value, std::string& error_msg) override;
-    KVTError set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+    KVTError set(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
                 const std::string& value, std::string& error_msg) override;
     KVTError del(uint64_t tx_id, uint64_t table_id, 
-            const std::string& key, std::string& error_msg) override;
-    KVTError scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
-                const std::string& key_end, size_t num_item_limit, 
-                std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) override;
+            const KVTKey& key, std::string& error_msg) override;
+    KVTError scan(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
+                const KVTKey& key_end, size_t num_item_limit, 
+                std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg) override;
   };
 
 

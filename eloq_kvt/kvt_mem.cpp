@@ -113,7 +113,7 @@ KVTError kvt_start_transaction(uint64_t& tx_id, std::string& error_msg) {
     return result;
 }
 
-KVTError kvt_get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+KVTError kvt_get(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
              std::string& value, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_get: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
     KVTError result = kvt_manager().get(tx_id, table_id, key, value, error_msg);
@@ -126,7 +126,7 @@ KVTError kvt_get(uint64_t tx_id, uint64_t table_id, const std::string& key,
     return result;
 }
 
-KVTError kvt_set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+KVTError kvt_set(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
              const std::string& value, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_set: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key << ", value=" << value);
     KVTError result = kvt_manager().set(tx_id, table_id, key, value, error_msg);
@@ -139,7 +139,7 @@ KVTError kvt_set(uint64_t tx_id, uint64_t table_id, const std::string& key,
     return result;
 }
 
-KVTError kvt_del(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+KVTError kvt_del(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
              std::string& error_msg) {
     VERBOSE(std::cout << "kvt_del: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
     KVTError result = kvt_manager().del(tx_id, table_id, key, error_msg);
@@ -152,9 +152,9 @@ KVTError kvt_del(uint64_t tx_id, uint64_t table_id, const std::string& key,
     return result;
 }
 
-KVTError kvt_scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
-              const std::string& key_end, size_t num_item_limit, 
-              std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) {
+KVTError kvt_scan(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
+              const KVTKey& key_end, size_t num_item_limit, 
+              std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_scan: tx_id=" << tx_id << ", table_id=" << table_id << ", key_start=" << key_start << ", key_end=" << key_end << ", limit=" << num_item_limit);
     KVTError result = kvt_manager().scan(tx_id, table_id, key_start, key_end, num_item_limit, results, error_msg);
     VERBOSE(
@@ -169,7 +169,7 @@ KVTError kvt_scan(uint64_t tx_id, uint64_t table_id, const std::string& key_star
 
 KVTError kvt_update(uint64_t tx_id, 
                         uint64_t table_id,
-                        const std::string& key,
+                        const KVTKey& key,
                         KVUpdateFunc & func,
                         const std::string& parameter,
                         std::string& result_value,
@@ -188,12 +188,12 @@ KVTError kvt_update(uint64_t tx_id,
 
 KVTError kvt_range_update(uint64_t tx_id, 
                             uint64_t table_id,
-                            const std::string& key_start,
-                            const std::string& key_end,
+                            const KVTKey& key_start,
+                            const KVTKey& key_end,
                             size_t num_item_limit,
                             KVUpdateFunc & func,
                             const std::string& parameter,
-                            std::vector<std::pair<std::string, std::string>>& results,
+                            std::vector<std::pair<KVTKey, std::string>>& results,
                             std::string& error_msg)
 {
     VERBOSE(std::cout << "kvt_range_update: tx_id=" << tx_id << ", table_id=" << table_id << ", key_start=" << key_start << ", key_end=" << key_end << ", limit=" << num_item_limit);
@@ -380,7 +380,7 @@ KVTError KVTMemManagerNoCC::rollback_transaction(uint64_t tx_id, std::string& er
     return KVTError::SUCCESS;
 }
 // Data operations  
-KVTError KVTMemManagerNoCC::get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+KVTError KVTMemManagerNoCC::get(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
             std::string& value, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (tx_id >= next_tx_id) {
@@ -412,7 +412,7 @@ KVTError KVTMemManagerNoCC::get(uint64_t tx_id, uint64_t table_id, const std::st
     return KVTError::SUCCESS;
 }
 
-KVTError KVTMemManagerNoCC::set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+KVTError KVTMemManagerNoCC::set(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
             const std::string& value, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (tx_id >= next_tx_id) {
@@ -440,7 +440,7 @@ KVTError KVTMemManagerNoCC::set(uint64_t tx_id, uint64_t table_id, const std::st
 
 }
 KVTError KVTMemManagerNoCC::del(uint64_t tx_id, uint64_t table_id, 
-        const std::string& key, std::string& error_msg) {
+        const KVTKey& key, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (tx_id >= next_tx_id) {
         error_msg = "Transaction " + std::to_string(tx_id) + " not found";
@@ -473,9 +473,9 @@ KVTError KVTMemManagerNoCC::del(uint64_t tx_id, uint64_t table_id,
     }
 }
 
-KVTError KVTMemManagerNoCC::scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
-            const std::string& key_end, size_t num_item_limit, 
-            std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) {
+KVTError KVTMemManagerNoCC::scan(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
+            const KVTKey& key_end, size_t num_item_limit, 
+            std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (tx_id >= next_tx_id) {
         error_msg = "Transaction " + std::to_string(tx_id) + " not found";
@@ -495,8 +495,8 @@ KVTError KVTMemManagerNoCC::scan(uint64_t tx_id, uint64_t table_id, const std::s
         return KVTError::TABLE_NOT_FOUND;
     }
     
-    std::string table_key = make_table_key(table_id, key_start);
-    std::string table_key_end = make_table_key(table_id, key_end);
+    KVTKey table_key = make_table_key(table_id, key_start);
+    KVTKey table_key_end = make_table_key(table_id, key_end);
     auto itr = table_data.lower_bound(table_key);
     auto end_itr = table_data.upper_bound(table_key_end);
     KVTError result = KVTError::SUCCESS;
@@ -640,7 +640,7 @@ KVTError KVTMemManagerSimple::rollback_transaction(uint64_t tx_id, std::string& 
     return KVTError::SUCCESS;
 }
 
-KVTError KVTMemManagerSimple::get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+KVTError KVTMemManagerSimple::get(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
             std::string& value, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     
@@ -683,7 +683,7 @@ KVTError KVTMemManagerSimple::get(uint64_t tx_id, uint64_t table_id, const std::
     return KVTError::SUCCESS;
 }
 
-KVTError KVTMemManagerSimple::set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+KVTError KVTMemManagerSimple::set(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
             const std::string& value, std::string& error_msg)
 {
     std::lock_guard<std::mutex> lock(global_mutex);
@@ -717,7 +717,7 @@ KVTError KVTMemManagerSimple::set(uint64_t tx_id, uint64_t table_id, const std::
     return KVTError::SUCCESS;
 }
 
-KVTError KVTMemManagerSimple::del(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+KVTError KVTMemManagerSimple::del(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
     std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     
@@ -757,9 +757,9 @@ KVTError KVTMemManagerSimple::del(uint64_t tx_id, uint64_t table_id, const std::
     return KVTError::SUCCESS;
 }
 
-KVTError KVTMemManagerSimple::scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
-            const std::string& key_end, size_t num_item_limit, 
-            std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) {
+KVTError KVTMemManagerSimple::scan(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
+            const KVTKey& key_end, size_t num_item_limit, 
+            std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     
     // Check if table_id exists
@@ -783,11 +783,11 @@ KVTError KVTMemManagerSimple::scan(uint64_t tx_id, uint64_t table_id, const std:
     }
     
     results.clear();
-    std::string table_key = make_table_key(table_id, key_start);
-    std::string table_key_end = make_table_key(table_id, key_end);
+    KVTKey table_key = make_table_key(table_id, key_start);
+    KVTKey table_key_end = make_table_key(table_id, key_end);
     
     // First, scan table_data for existing keys
-    std::map<std::string, std::string> result_map; 
+    std::map<KVTKey, std::string> result_map; 
     auto itr = table_data.lower_bound(table_key);
     auto end_itr = table_data.upper_bound(table_key_end);
     result_map.insert(itr, end_itr);
@@ -931,7 +931,7 @@ KVTError KVTMemManager2PL::rollback_transaction(uint64_t tx_id, std::string& err
     return KVTError::SUCCESS;
 }
 
-KVTError KVTMemManager2PL::get(uint64_t tx_id, uint64_t table_id, const std::string& key,
+KVTError KVTMemManager2PL::get(uint64_t tx_id, uint64_t table_id, const KVTKey& key,
             std::string& value, std::string& error_msg)  {
     std::lock_guard<std::mutex> lock(global_mutex);
     
@@ -1009,7 +1009,7 @@ KVTError KVTMemManager2PL::get(uint64_t tx_id, uint64_t table_id, const std::str
     return KVTError::SUCCESS;
 }
 
-KVTError KVTMemManager2PL::set(uint64_t tx_id, uint64_t table_id, const std::string& key,
+KVTError KVTMemManager2PL::set(uint64_t tx_id, uint64_t table_id, const KVTKey& key,
             const std::string& value, std::string& error_msg)  {
     std::lock_guard<std::mutex> lock(global_mutex);
     
@@ -1083,7 +1083,7 @@ KVTError KVTMemManager2PL::set(uint64_t tx_id, uint64_t table_id, const std::str
     return KVTError::SUCCESS;
 }
 
-KVTError KVTMemManager2PL::del(uint64_t tx_id, uint64_t table_id, const std::string& key,
+KVTError KVTMemManager2PL::del(uint64_t tx_id, uint64_t table_id, const KVTKey& key,
             std::string& error_msg)  {
     std::lock_guard<std::mutex> lock(global_mutex);
     
@@ -1165,9 +1165,9 @@ KVTError KVTMemManager2PL::del(uint64_t tx_id, uint64_t table_id, const std::str
     return KVTError::SUCCESS;
 }
 
-KVTError KVTMemManager2PL::scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start,
-            const std::string& key_end, size_t num_item_limit,
-            std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg)  {
+KVTError KVTMemManager2PL::scan(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start,
+            const KVTKey& key_end, size_t num_item_limit,
+            std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg)  {
     std::lock_guard<std::mutex> lock(global_mutex);
     
     Table* table = get_table_by_id(table_id);
@@ -1196,11 +1196,11 @@ KVTError KVTMemManager2PL::scan(uint64_t tx_id, uint64_t table_id, const std::st
     }
     
     // Collect results from write set and table
-    std::map<std::string, std::string> temp_results;
+    std::map<KVTKey, std::string> temp_results;
     
     // First add from write set
-    std::string table_key_start = make_table_key(table_id, key_start);
-    std::string table_key_end = make_table_key(table_id, key_end);
+    KVTKey table_key_start = make_table_key(table_id, key_start);
+    KVTKey table_key_end = make_table_key(table_id, key_end);
 
     for (auto it = tx->write_set.lower_bound(table_key_start);
             it != tx->write_set.end() && it->first < table_key_end;
@@ -1215,7 +1215,7 @@ KVTError KVTMemManager2PL::scan(uint64_t tx_id, uint64_t table_id, const std::st
     for (auto it = table->data.lower_bound(key_start);
             it != table->data.end() && it->first < key_end;
             ++it) {
-        std::string table_key = make_table_key(table_id, it->first);
+        KVTKey table_key = make_table_key(table_id, it->first);
         // Skip if deleted
         if (tx->delete_set.find(table_key) != tx->delete_set.end()) {
             continue;
@@ -1302,7 +1302,7 @@ KVTError KVTMemManagerOCC::rollback_transaction(uint64_t tx_id, std::string& err
     return KVTError::SUCCESS;
 }
 
-KVTError KVTMemManagerOCC::get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+KVTError KVTMemManagerOCC::get(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
         std::string& value, std::string& error_msg) 
 {
     std::lock_guard<std::mutex> lock(global_mutex);
@@ -1353,7 +1353,7 @@ KVTError KVTMemManagerOCC::get(uint64_t tx_id, uint64_t table_id, const std::str
     return KVTError::SUCCESS;
 }
 
-  KVTError KVTMemManagerOCC::set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
+  KVTError KVTMemManagerOCC::set(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
            const std::string& value, std::string& error_msg) 
     {
         std::lock_guard<std::mutex> lock(global_mutex);
@@ -1385,7 +1385,7 @@ KVTError KVTMemManagerOCC::get(uint64_t tx_id, uint64_t table_id, const std::str
         return KVTError::SUCCESS;
     }
 
-KVTError KVTMemManagerOCC::del(uint64_t tx_id, uint64_t table_id, const std::string& key, std::string& error_msg) 
+KVTError KVTMemManagerOCC::del(uint64_t tx_id, uint64_t table_id, const KVTKey& key, std::string& error_msg) 
 {
     std::lock_guard<std::mutex> lock(global_mutex);
     if (tx_id == 0) {
@@ -1430,9 +1430,9 @@ KVTError KVTMemManagerOCC::del(uint64_t tx_id, uint64_t table_id, const std::str
 }
 
 
-KVTError KVTMemManagerOCC::scan(uint64_t tx_id, uint64_t table_id, const std::string& key_start, 
-        const std::string& key_end, size_t num_item_limit, 
-        std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) 
+KVTError KVTMemManagerOCC::scan(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
+        const KVTKey& key_end, size_t num_item_limit, 
+        std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg) 
 {
     std::lock_guard<std::mutex> lock(global_mutex);
     Table* table = get_table_by_id(table_id);
@@ -1454,10 +1454,10 @@ KVTError KVTMemManagerOCC::scan(uint64_t tx_id, uint64_t table_id, const std::st
         error_msg = "Transaction " + std::to_string(tx_id) + " not found";
         return KVTError::TRANSACTION_NOT_FOUND;
     }
-    std::map<std::string, std::string> results_writes;
+    std::map<KVTKey, std::string> results_writes;
     {
-        std::string table_key_start = make_table_key(table_id, key_start);
-        std::string table_key_end = make_table_key(table_id, key_end);
+        KVTKey table_key_start = make_table_key(table_id, key_start);
+        KVTKey table_key_end = make_table_key(table_id, key_end);
         //first put all write_set into results
         for (auto itr = tx->write_set.lower_bound(table_key_start); itr != tx->write_set.end() && itr->first < table_key_end; ++itr) {
             auto [table_id_parsed, key] = parse_table_key(itr->first);
@@ -1467,12 +1467,12 @@ KVTError KVTMemManagerOCC::scan(uint64_t tx_id, uint64_t table_id, const std::st
             }
         }
     }
-    std::map<std::string, std::string> results_table;
+    std::map<KVTKey, std::string> results_table;
     //now collect from table, put into read_set if necessary
     for (auto itr = table->data.lower_bound(key_start); itr != table->data.end() && itr->first < key_end; ++itr) {
         if (results_writes.find(itr->first) != results_writes.end()) //already in write set, skip
             continue;
-        std::string table_key = make_table_key(table_id, itr->first);
+        KVTKey table_key = make_table_key(table_id, itr->first);
         if (tx->delete_set.find(table_key) != tx->delete_set.end()) //being deleted, skip
             continue;
         if (tx->read_set.find(table_key) == tx->read_set.end()) { //not in the read set, so need to read from table.
