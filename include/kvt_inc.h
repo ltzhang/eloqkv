@@ -24,12 +24,19 @@
     KEY_NOT_FOUND,                         // Key does not exist in the table
     KEY_IS_DELETED,                        // Key was deleted in the current transaction
     KEY_IS_LOCKED,                         // Key is locked by another transaction (2PL)
+    KEY_VERSION_MISMATCH,                  // Key version mismatch
+    WRITE_CONFLICT,                        // Write conflict
+    DELETE_CONFLICT,                       // Delete conflict
+    UPDATE_CONFLICT,                       // Update conflict
+    RANGE_UPDATE_CONFLICT,                 // Range update conflict
+    RANGE_DELETE_CONFLICT,                 // Range delete conflict
+    RANGE_INSERT_CONFLICT,                 // Range insert conflict
     TRANSACTION_HAS_STALE_DATA,            // OCC validation failed due to concurrent modifications
     ONE_SHOT_WRITE_NOT_ALLOWED,            // Write operations require an active transaction
     ONE_SHOT_DELETE_NOT_ALLOWED,           // Delete operations require an active transaction
     BATCH_NOT_FULLY_SUCCESS,               // Some operations succeeded, some failed
-    SCAN_LIMIT_REACHED,                    // Scan limit reached: this is not an error,
     EXT_FUNC_ERROR,                        // Error returned from external function
+    SCAN_LIMIT_REACHED,                    // Scan limit reached: this is not an error,
     UNKNOWN_ERROR                          // Unknown or unexpected error
 };
 
@@ -258,14 +265,15 @@ KVTError kvt_scan(uint64_t tx_id,
  *  "op[" + std::to_string(i) + "]: " + op_error + "; "
  * @return KVTError::SUCCESS if all operations successful, KVTError::BATCH_NOT_FULLY_SUCCESS if some failed
  */
- KVTError kvt_batch_execute(uint64_t tx_id,
+KVTError kvt_batch_execute(uint64_t tx_id,
     const KVTBatchOps& batch_ops,
     KVTBatchResults& batch_results,
     std::string& error_msg);
 
-//first return value mark success or failure                                  
-//second return value mark if value needs update, if true, new value is set, otherwise, keep original value unchanged. 
-typedef std::function<std::pair<bool /*success*/, bool /*update value*/> (
+//first return value mark success or failure 
+//second return value mark if we need to update the value in the table
+//third return value mark if we need to return the value to the user. 
+typedef std::function<std::tuple<bool /*success*/, bool /*update value*/, bool /* return value*/ > (
     const std::string& /* key */, 
     const std::string& /* original value*/, 
     const std::string& /* parameter value*/, 
@@ -290,6 +298,7 @@ KVTError kvt_update(uint64_t tx_id,
     const std::string& parameter,
     std::string& result_value,
     std::string& error_msg);
+
 
 /**
 * @param tx_id Transaction ID (0 for auto-commit/one-shot operation)

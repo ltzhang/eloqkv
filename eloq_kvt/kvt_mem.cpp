@@ -35,9 +35,17 @@ void kvt_shutdown() {
     g_kvt_manager.reset();
 }
 
+KVTWrapper& kvt_manager() {
+    if (g_kvt_manager == nullptr) {
+        std::cerr << "^^^Warning: kvt_manager() is called before kvt_initialize()" << std::endl;
+        kvt_initialize();
+    }
+    return *g_kvt_manager.get();
+}
+
 KVTError kvt_create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_create_table: table_name=" << table_name << ", partition_method=" << partition_method);
-    KVTError result = g_kvt_manager->create_table(table_name, partition_method, table_id, error_msg);
+    KVTError result = kvt_manager().create_table(table_name, partition_method, table_id, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
@@ -48,7 +56,7 @@ KVTError kvt_create_table(const std::string& table_name, const std::string& part
 
 KVTError kvt_drop_table(uint64_t table_id, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_drop_table: table_id=" << table_id);
-    KVTError result = g_kvt_manager->drop_table(table_id, error_msg);
+    KVTError result = kvt_manager().drop_table(table_id, error_msg);
     VERBOSE( 
         if (result != KVTError::SUCCESS) 
             std::cout << " -> ERROR: " << error_msg << std::endl; 
@@ -59,7 +67,7 @@ KVTError kvt_drop_table(uint64_t table_id, std::string& error_msg) {
 
 KVTError kvt_get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_get_table_name: table_id=" << table_id);
-    KVTError result = g_kvt_manager->get_table_name(table_id, table_name, error_msg);
+    KVTError result = kvt_manager().get_table_name(table_id, table_name, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
@@ -71,7 +79,7 @@ KVTError kvt_get_table_name(uint64_t table_id, std::string& table_name, std::str
 
 KVTError kvt_get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_get_table_id: table_name=" << table_name);
-    KVTError result = g_kvt_manager->get_table_id(table_name, table_id, error_msg);
+    KVTError result = kvt_manager().get_table_id(table_name, table_id, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
@@ -83,7 +91,7 @@ KVTError kvt_get_table_id(const std::string& table_name, uint64_t& table_id, std
 
 KVTError kvt_list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_list_tables");
-    KVTError result = g_kvt_manager->list_tables(results, error_msg);
+    KVTError result = kvt_manager().list_tables(results, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
@@ -95,7 +103,7 @@ KVTError kvt_list_tables(std::vector<std::pair<std::string, uint64_t>>& results,
 
 KVTError kvt_start_transaction(uint64_t& tx_id, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_start_transaction");
-    KVTError result = g_kvt_manager->start_transaction(tx_id, error_msg);
+    KVTError result = kvt_manager().start_transaction(tx_id, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
@@ -108,7 +116,7 @@ KVTError kvt_start_transaction(uint64_t& tx_id, std::string& error_msg) {
 KVTError kvt_get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
              std::string& value, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_get: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
-    KVTError result = g_kvt_manager->get(tx_id, table_id, key, value, error_msg);
+    KVTError result = kvt_manager().get(tx_id, table_id, key, value, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
@@ -121,7 +129,7 @@ KVTError kvt_get(uint64_t tx_id, uint64_t table_id, const std::string& key,
 KVTError kvt_set(uint64_t tx_id, uint64_t table_id, const std::string& key, 
              const std::string& value, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_set: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key << ", value=" << value);
-    KVTError result = g_kvt_manager->set(tx_id, table_id, key, value, error_msg);
+    KVTError result = kvt_manager().set(tx_id, table_id, key, value, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
@@ -134,7 +142,7 @@ KVTError kvt_set(uint64_t tx_id, uint64_t table_id, const std::string& key,
 KVTError kvt_del(uint64_t tx_id, uint64_t table_id, const std::string& key, 
              std::string& error_msg) {
     VERBOSE(std::cout << "kvt_del: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
-    KVTError result = g_kvt_manager->del(tx_id, table_id, key, error_msg);
+    KVTError result = kvt_manager().del(tx_id, table_id, key, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
@@ -148,7 +156,7 @@ KVTError kvt_scan(uint64_t tx_id, uint64_t table_id, const std::string& key_star
               const std::string& key_end, size_t num_item_limit, 
               std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_scan: tx_id=" << tx_id << ", table_id=" << table_id << ", key_start=" << key_start << ", key_end=" << key_end << ", limit=" << num_item_limit);
-    KVTError result = g_kvt_manager->scan(tx_id, table_id, key_start, key_end, num_item_limit, results, error_msg);
+    KVTError result = kvt_manager().scan(tx_id, table_id, key_start, key_end, num_item_limit, results, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
@@ -168,7 +176,7 @@ KVTError kvt_update(uint64_t tx_id,
                         std::string& error_msg) 
 {
     VERBOSE(std::cout << "kvt_update: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
-    KVTError result = g_kvt_manager->update(tx_id, table_id, key, func, parameter, result_value, error_msg);
+    KVTError result = kvt_manager().update(tx_id, table_id, key, func, parameter, result_value, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
@@ -189,7 +197,7 @@ KVTError kvt_range_update(uint64_t tx_id,
                             std::string& error_msg)
 {
     VERBOSE(std::cout << "kvt_range_update: tx_id=" << tx_id << ", table_id=" << table_id << ", key_start=" << key_start << ", key_end=" << key_end << ", limit=" << num_item_limit);
-    KVTError result = g_kvt_manager->range_update(tx_id, table_id, key_start, key_end, num_item_limit, func, parameter, results, error_msg);
+    KVTError result = kvt_manager().range_update(tx_id, table_id, key_start, key_end, num_item_limit, func, parameter, results, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
@@ -204,7 +212,7 @@ KVTError kvt_range_update(uint64_t tx_id,
 // KVTError kvt_ext_get(uint64_t tx_id, uint64_t table_id, const std::string& key, 
 //              KVTExtGetFunc & func, std::string& value, std::string& error_msg) {
 //     std::string intermediate_value;
-//     KVTError result = g_kvt_manager->get(tx_id, table_id, key, intermediate_value, error_msg);
+//     KVTError result = kvt_manager().get(tx_id, table_id, key, intermediate_value, error_msg);
 //     if (result != KVTError::SUCCESS) 
 //         return result;
 //     result = func(intermediate_value, value);
@@ -220,7 +228,7 @@ KVTError kvt_range_update(uint64_t tx_id,
 // KVTError kvt_ext_del(uint64_t tx_id, uint64_t table_id, const std::string& key, 
 //              KVTExtDelFunc & func, std::string& error_msg) {
 //     VERBOSE(std::cout << "kvt_ext_del: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
-//     KVTError result = g_kvt_manager->ext_del(tx_id, table_id, key, func, error_msg);
+//     KVTError result = kvt_manager().ext_del(tx_id, table_id, key, func, error_msg);
 //     if (result != KVTError::SUCCESS) {
 //         VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
 //     } else {
@@ -233,7 +241,7 @@ KVTError kvt_range_update(uint64_t tx_id,
 //               const std::string& key_end, size_t num_item_limit, 
 //               KVTExtScanFunc & func, std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg) {
 //     VERBOSE(std::cout << "kvt_ext_scan: tx_id=" << tx_id << ", table_id=" << table_id << ", key_start=" << key_start << ", key_end=" << key_end << ", limit=" << num_item_limit);
-//     KVTError result = g_kvt_manager->ext_scan(tx_id, table_id, key_start, key_end, num_item_limit, func, results, error_msg);
+//     KVTError result = kvt_manager().ext_scan(tx_id, table_id, key_start, key_end, num_item_limit, func, results, error_msg);
 //     if (result != KVTError::SUCCESS) {
 //         VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
 //     } else {
@@ -244,7 +252,7 @@ KVTError kvt_range_update(uint64_t tx_id,
 
 KVTError kvt_commit_transaction(uint64_t tx_id, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_commit_transaction: tx_id=" << tx_id);
-    KVTError result = g_kvt_manager->commit_transaction(tx_id, error_msg);
+    KVTError result = kvt_manager().commit_transaction(tx_id, error_msg);
     if (result != KVTError::SUCCESS) {
         VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
@@ -255,7 +263,7 @@ KVTError kvt_commit_transaction(uint64_t tx_id, std::string& error_msg) {
 
 KVTError kvt_rollback_transaction(uint64_t tx_id, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_rollback_transaction: tx_id=" << tx_id);
-    KVTError result = g_kvt_manager->rollback_transaction(tx_id, error_msg);
+    KVTError result = kvt_manager().rollback_transaction(tx_id, error_msg);
     if (result != KVTError::SUCCESS) {
         VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {
@@ -267,7 +275,7 @@ KVTError kvt_rollback_transaction(uint64_t tx_id, std::string& error_msg) {
 KVTError kvt_batch_execute(uint64_t tx_id, const KVTBatchOps& batch_ops, 
                           KVTBatchResults& batch_results, std::string& error_msg) {
     VERBOSE(std::cout << "kvt_batch_execute: tx_id=" << tx_id << ", ops_count=" << batch_ops.size());
-    KVTError result = g_kvt_manager->batch_execute(tx_id, batch_ops, batch_results, error_msg);
+    KVTError result = kvt_manager().batch_execute(tx_id, batch_ops, batch_results, error_msg);
     if (result != KVTError::SUCCESS) {
         VERBOSE(std::cout << " -> ERROR: " << error_msg << std::endl);
     } else {

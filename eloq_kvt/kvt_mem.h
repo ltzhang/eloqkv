@@ -71,16 +71,17 @@ class KVTWrapper
                     if (r_get != KVTError::SUCCESS)
                         return r_get;
                     std::string new_value;
-                    std::pair<bool, bool> r_update = func(key, orig_value, parameter, new_value, result_value);
-                    if (!r_update.first) { //function failed
+                    std::tuple<bool, bool, bool> r_update = func(key, orig_value, parameter, new_value, result_value);
+                    if (!std::get<0>(r_update)) { //function failed
                         error_msg = std::move(result_value);
                         return KVTError::EXT_FUNC_ERROR;
                     }
-                    if (r_update.second) { //value needs update
+                    if (std::get<1>(r_update)) { //value needs update
                         KVTError r_set = set(tx_id, table_id, key, new_value, error_msg);
                         if (r_set != KVTError::SUCCESS)
                             return r_set;
                     }
+                    //for single item, we return the result value to the user regardless of the third return value
                     return KVTError::SUCCESS;
                                  
                 }
@@ -89,26 +90,38 @@ class KVTWrapper
                   KVUpdateFunc & func, const std::string& parameter, std::vector<std::pair<std::string, std::string>>& results, std::string& error_msg)
                 {
                     std::vector<std::pair<std::string, std::string>> temp_results;
-                    KVTError r_scan = scan(tx_id, table_id, key_start, key_end, num_item_limit, temp_results, error_msg);
-                    if (r_scan != KVTError::SUCCESS && r_scan != KVTError::SCAN_LIMIT_REACHED)
-                        return r_scan;
-                    for (auto& [key, orig_value] : temp_results) {
-                        std::string new_value;
-                        std::string result_value;
-                        std::pair<bool, bool> r_update = func(key, orig_value, parameter, new_value, result_value);
-                        if (!r_update.first) { //function failed
-                            error_msg = std::move(result_value);
-                            return KVTError::EXT_FUNC_ERROR;
+                    std::string new_sart_key;
+                    new_sart_key = key_start;
+                    KVTError r_scan = KVTError::UNKNOWN_ERROR;
+                    while (results.size() < num_item_limit) {
+                        temp_results.clear();
+                        r_scan = scan(tx_id, table_id, new_sart_key, key_end, num_item_limit, temp_results, error_msg);
+                        if (r_scan != KVTError::SUCCESS && r_scan != KVTError::SCAN_LIMIT_REACHED) {
+                            results.clear();
+                            return r_scan;
                         }
-                        if (r_update.second) { //value needs update
-                            KVTError r_set = set(tx_id, table_id, key, new_value, error_msg);
-                            if (r_set != KVTError::SUCCESS)
-                                return r_set;
+                        for (auto& [key, orig_value] : temp_results) {
+                            std::string new_value;
+                            std::string result_value;
+                            std::tuple<bool, bool, bool> r_update = func(key, orig_value, parameter, new_value, result_value);
+                            if (!std::get<0>(r_update)) { //function failed
+                                error_msg = std::move(result_value);
+                                results.clear();
+                                return KVTError::EXT_FUNC_ERROR;
+                            }
+                            if (std::get<1>(r_update)) { //value needs update
+                                KVTError r_set = set(tx_id, table_id, key, new_value, error_msg);
+                                if (r_set != KVTError::SUCCESS) {
+                                    results.clear();
+                                    return r_set;
+                                }
+                            }
+                            if (std::get<2>(r_update)) { //return value to the user
+                                results.emplace_back(key, result_value);
+                            }
                         }
-                        results.emplace_back(key, result_value);
                     }
                     return r_scan;
-                                 
                 }
  
         // Default batch execute implementation - executes operations individually
