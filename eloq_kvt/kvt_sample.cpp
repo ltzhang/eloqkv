@@ -194,7 +194,7 @@ void test_range_scan() {
     std::cout << "✓ Inserted 5 products" << std::endl;
     
     // Scan a range
-    std::vector<std::pair<std::string, std::string>> results;
+    std::vector<std::pair<KVTKey, std::string>> results;
     result = kvt_scan(0, table_id, "prod:002", "prod:004", 10, results, error);
     if (result == KVTError::SUCCESS) {
         std::cout << "✓ Scan from prod:002 to prod:004 returned " << results.size() << " items:" << std::endl;
@@ -203,6 +203,178 @@ void test_range_scan() {
         }
     } else {
         std::cerr << "Scan failed: " << error << std::endl;
+    }
+}
+
+// Example function for atomic increment
+bool atomic_increment_func(KVTProcessInput& input, KVTProcessOutput& output) {
+    try {
+        // Parse current value as integer
+        int current_value = std::stoi(*input.value);
+        int new_value = current_value + 1;
+        
+        // Update the value
+        output.update_value = std::to_string(new_value);
+        
+        // Return the old value
+        output.return_value = std::to_string(current_value);
+        
+        return true;
+    } catch (const std::exception& e) {
+        output.return_value = "Error: Invalid integer value";
+        return false;
+    }
+}
+
+// Example function for substring extraction
+bool substring_extract_func(KVTProcessInput& input, KVTProcessOutput& output) {
+    try {
+        // Parse parameter as "start:length" format
+        std::string param = *input.parameter;
+        size_t colon_pos = param.find(':');
+        if (colon_pos == std::string::npos) {
+            output.return_value = "Error: Parameter must be in format 'start:length'";
+            return false;
+        }
+        
+        int start = std::stoi(param.substr(0, colon_pos));
+        int length = std::stoi(param.substr(colon_pos + 1));
+        
+        if (start < 0 || length < 0 || start + length > static_cast<int>(input.value->size())) {
+            output.return_value = "Error: Invalid substring parameters";
+            return false;
+        }
+        
+        // Extract substring
+        std::string substring = input.value->substr(start, length);
+        output.return_value = substring;
+        
+        return true;
+    } catch (const std::exception& e) {
+        output.return_value = "Error: Invalid parameter format";
+        return false;
+    }
+}
+
+// Example function for conditional delete
+bool conditional_delete_func(KVTProcessInput& input, KVTProcessOutput& output) {
+    // If the value contains the parameter string, delete the key
+    if (input.value->find(*input.parameter) != std::string::npos) {
+        output.delete_key = true;
+        output.return_value = "Deleted: " + *input.value;
+    } else {
+        output.return_value = "Kept: " + *input.value;
+    }
+    
+    return true;
+}
+
+void test_kvt_process() {
+    print_separator("KVT Process Test (Single Key Operations)");
+    
+    std::string error;
+    
+    // Get the users table ID
+    uint64_t table_id;
+    KVTError result = kvt_get_table_id("users", table_id, error);
+    if (result != KVTError::SUCCESS) {
+        std::cerr << "Failed to get table ID: " << error << std::endl;
+        return;
+    }
+    
+    // Test atomic increment
+    std::cout << "\n--- Testing Atomic Increment ---" << std::endl;
+    
+    // Set initial value
+    kvt_set(0, table_id, "counter", "5", error);
+    std::cout << "✓ Set counter = 5" << std::endl;
+    
+    // Perform atomic increment
+    std::string parameter = ""; // No parameter needed for increment
+    std::string return_value;
+    result = kvt_process(0, table_id, "counter", atomic_increment_func, parameter, return_value, error);
+    if (result == KVTError::SUCCESS) {
+        std::cout << "✓ Atomic increment returned old value: " << return_value << std::endl;
+        
+        // Verify the new value
+        std::string new_value;
+        kvt_get(0, table_id, "counter", new_value, error);
+        std::cout << "✓ Counter is now: " << new_value << std::endl;
+        assert(new_value == "6");
+    } else {
+        std::cerr << "Atomic increment failed: " << error << std::endl;
+    }
+    
+    // Test substring extraction
+    std::cout << "\n--- Testing Substring Extraction ---" << std::endl;
+    
+    // Set a test string
+    kvt_set(0, table_id, "text", "Hello World", error);
+    std::cout << "✓ Set text = 'Hello World'" << std::endl;
+    
+    // Extract substring "World" (start=6, length=5)
+    parameter = "6:5";
+    result = kvt_process(0, table_id, "text", substring_extract_func, parameter, return_value, error);
+    if (result == KVTError::SUCCESS) {
+        std::cout << "✓ Extracted substring: '" << return_value << "'" << std::endl;
+        assert(return_value == "World");
+    } else {
+        std::cerr << "Substring extraction failed: " << error << std::endl;
+    }
+}
+
+void test_kvt_range_process() {
+    print_separator("KVT Range Process Test (Range Operations)");
+    
+    std::string error;
+    
+    // Get the products table ID
+    uint64_t table_id;
+    KVTError result = kvt_get_table_id("products", table_id, error);
+    if (result != KVTError::SUCCESS) {
+        std::cerr << "Failed to get table ID: " << error << std::endl;
+        return;
+    }
+    
+    // Add some products with descriptions
+    kvt_set(0, table_id, "prod:006", "Wireless Mouse", error);
+    kvt_set(0, table_id, "prod:007", "Wired Keyboard", error);
+    kvt_set(0, table_id, "prod:008", "Bluetooth Headphones", error);
+    kvt_set(0, table_id, "prod:009", "USB Cable", error);
+    std::cout << "✓ Added 4 more products" << std::endl;
+    
+    // Test conditional delete - delete products containing "Wireless"
+    std::cout << "\n--- Testing Conditional Delete ---" << std::endl;
+    
+    std::string parameter = "Wireless";
+    std::vector<std::pair<KVTKey, std::string>> results;
+    result = kvt_range_process(0, table_id, "prod:001", "prod:010", 10, 
+                              conditional_delete_func, parameter, results, error);
+    
+    if (result == KVTError::SUCCESS) {
+        std::cout << "✓ Range process completed. Results:" << std::endl;
+        for (const auto& [key, value] : results) {
+            std::cout << "  " << key << ": " << value << std::endl;
+        }
+        
+        // Verify that "Wireless Mouse" was deleted
+        std::string value;
+        result = kvt_get(0, table_id, "prod:006", value, error);
+        if (result != KVTError::SUCCESS) {
+            std::cout << "✓ Verified 'Wireless Mouse' was deleted" << std::endl;
+        } else {
+            std::cerr << "ERROR: 'Wireless Mouse' should have been deleted!" << std::endl;
+        }
+        
+        // Verify that "Wired Keyboard" was kept
+        result = kvt_get(0, table_id, "prod:007", value, error);
+        if (result == KVTError::SUCCESS) {
+            std::cout << "✓ Verified 'Wired Keyboard' was kept: " << value << std::endl;
+        } else {
+            std::cerr << "ERROR: 'Wired Keyboard' should have been kept!" << std::endl;
+        }
+    } else {
+        std::cerr << "Range process failed: " << error << std::endl;
     }
 }
 
@@ -280,6 +452,8 @@ int main() {
         test_transactions();
         test_rollback();
         test_range_scan();
+        test_kvt_process();
+        test_kvt_range_process();
         test_concurrent_transactions();
         
         print_separator("All Tests Completed Successfully");

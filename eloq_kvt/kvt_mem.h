@@ -64,63 +64,108 @@ class KVTWrapper
                   std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg) = 0;
 
         virtual KVTError update(uint64_t tx_id, uint64_t table_id, const KVTKey& key, 
-                 KVUpdateFunc & func, const std::string& parameter, std::string& result_value, std::string& error_msg)
+                 const KVTProcessFunc& func, const std::string& parameter, std::string& result_value, std::string& error_msg)
                 {
                     std::string orig_value;
                     KVTError r_get = get(tx_id, table_id, key, orig_value, error_msg);
                     if (r_get != KVTError::SUCCESS)
                         return r_get;
-                    std::string new_value;
-                    std::tuple<bool, bool, bool> r_update = func(key, orig_value, parameter, new_value, result_value);
-                    if (!std::get<0>(r_update)) { //function failed
-                        error_msg = std::move(result_value);
+                    
+                    KVTProcessInput input(&key, &orig_value, &parameter);
+                    KVTProcessOutput output;
+                    bool success = func(input, output);
+                    
+                    if (!success) {
+                        if (output.return_value.has_value()) {
+                            error_msg = output.return_value.value();
+                        } else {
+                            error_msg = "Process function failed";
+                        }
                         return KVTError::EXT_FUNC_ERROR;
                     }
-                    if (std::get<1>(r_update)) { //value needs update
-                        KVTError r_set = set(tx_id, table_id, key, new_value, error_msg);
-                        if (r_set != KVTError::SUCCESS)
+                    
+                    if (output.update_value.has_value()) {
+                        KVTError r_set = set(tx_id, table_id, key, output.update_value.value(), error_msg);
+                        if (r_set != KVTError::SUCCESS) {
+                            result_value.clear();
                             return r_set;
+                        }
                     }
-                    //for single item, we return the result value to the user regardless of the third return value
+                    
+                    if (output.delete_key) {
+                        KVTError r_del = del(tx_id, table_id, key, error_msg);
+                        if (r_del != KVTError::SUCCESS) {
+                            result_value.clear();
+                            return r_del;
+                        }
+                    }
+                    
+                    if (output.return_value.has_value()) {
+                        result_value = output.return_value.value();
+                    } else {
+                        result_value.clear();
+                    }
+                    
                     return KVTError::SUCCESS;
-                                 
                 }
-        virtual KVTError range_update(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
+                
+        virtual KVTError range_process(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start, 
                   const KVTKey& key_end, size_t num_item_limit, 
-                  KVUpdateFunc & func, const std::string& parameter, std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg)
+                  const KVTProcessFunc& func, const std::string& parameter, std::vector<std::pair<KVTKey, std::string>>& results, std::string& error_msg)
                 {
                     std::vector<std::pair<KVTKey, std::string>> temp_results;
-                    KVTKey new_sart_key;
-                    new_sart_key = key_start;
+                    KVTKey new_start_key = key_start;
                     KVTError r_scan = KVTError::UNKNOWN_ERROR;
+                    
                     while (results.size() < num_item_limit) {
                         temp_results.clear();
-                        r_scan = scan(tx_id, table_id, new_sart_key, key_end, num_item_limit, temp_results, error_msg);
+                        r_scan = scan(tx_id, table_id, new_start_key, key_end, num_item_limit, temp_results, error_msg);
                         if (r_scan != KVTError::SUCCESS && r_scan != KVTError::SCAN_LIMIT_REACHED) {
                             results.clear();
                             return r_scan;
                         }
+                        
                         for (auto& [key, orig_value] : temp_results) {
-                            std::string new_value;
-                            std::string result_value;
-                            std::tuple<bool, bool, bool> r_update = func(key, orig_value, parameter, new_value, result_value);
-                            if (!std::get<0>(r_update)) { //function failed
-                                error_msg = std::move(result_value);
+                            KVTProcessInput input(&key, &orig_value, &parameter);
+                            KVTProcessOutput output;
+                            bool success = func(input, output);
+                            
+                            if (!success) {
+                                if (output.return_value.has_value()) {
+                                    error_msg = output.return_value.value();
+                                } else {
+                                    error_msg = "Process function failed";
+                                }
                                 results.clear();
                                 return KVTError::EXT_FUNC_ERROR;
                             }
-                            if (std::get<1>(r_update)) { //value needs update
-                                KVTError r_set = set(tx_id, table_id, key, new_value, error_msg);
+                            
+                            if (output.update_value.has_value()) {
+                                KVTError r_set = set(tx_id, table_id, key, output.update_value.value(), error_msg);
                                 if (r_set != KVTError::SUCCESS) {
                                     results.clear();
                                     return r_set;
                                 }
                             }
-                            if (std::get<2>(r_update)) { //return value to the user
-                                results.emplace_back(key, result_value);
+                            
+                            if (output.delete_key) {
+                                KVTError r_del = del(tx_id, table_id, key, error_msg);
+                                if (r_del != KVTError::SUCCESS) {
+                                    results.clear();
+                                    return r_del;
+                                }
+                            }
+                            
+                            if (output.return_value.has_value()) {
+                                results.emplace_back(key, output.return_value.value());
                             }
                         }
+                        
+                        if (temp_results.empty()) break;
+                        new_start_key = temp_results.back().first;
+                        new_start_key += '\0'; // Move to next key
                     }
+                    
                     return r_scan;
                 }
  

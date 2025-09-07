@@ -6,7 +6,8 @@
 #include <utility>
 #include <cstdint>
 #include <functional>
-
+#include <optional>
+#include <cstdlib>
 class KVTKey : public std::string {
 public:
     KVTKey() : std::string() {}
@@ -286,6 +287,8 @@ KVTError kvt_scan(uint64_t tx_id,
                 std::vector<std::pair<KVTKey, std::string>>& results,
                 std::string& error_msg);
 
+
+
 /**
  * Execute a batch of operations within a transaction.
  * Operations are executed sequentially. If all operations succeed, returns SUCCESS.
@@ -302,33 +305,114 @@ KVTError kvt_batch_execute(uint64_t tx_id,
     KVTBatchResults& batch_results,
     std::string& error_msg);
 
-//first return value mark success or failure 
-//second return value mark if we need to update the value in the table
-//third return value mark if we need to return the value to the user. 
-typedef std::function<std::tuple<bool /*success*/, bool /*update value*/, bool /* return value*/ > (
-    const KVTKey& /* key */, 
-    const std::string& /* original value*/, 
-    const std::string& /* parameter value*/, 
-    std::string& /*new value to be set*/, 
-    std::string& /*result value returned to user, or error message if not SUCCESS*/)> KVUpdateFunc;
+//=============================================================================================
+// The following interfaces are for computation push down. 
+// We can push down the computation to the KVT layer, 
+// so that the computation is executed in the KVT layer 
+// instead of the user layer, to avoid data copying and
+// reduce the overhead of data serialization and deserialization.
+// kvt_process is used for single key operation, for operations 
+// such as atomic increment, and substring or subfiled extraction. 
+// and kvt_range_process is used for range operation, for filtering
+// and aggregation and so on. 
+struct KVTProcessInput{
+    const KVTKey * key;
+    const std::string * value;
+    const std::string * parameter = nullptr;
+    bool range_first = true;  
+    bool range_last = true;
+    KVTProcessInput(const KVTKey * key, const std::string * value):
+                    key(key), value(value){}
+    KVTProcessInput(const KVTKey * key, const std::string * value, const std::string * parameter):
+                    key(key), value(value), parameter(parameter){}
+    KVTProcessInput(const KVTKey * key, const std::string * value, const std::string * parameter, bool range_first, bool range_last):
+                    key(key), value(value), parameter(parameter), range_first(range_first), range_last(range_last){}
+};
+
+struct KVTProcessOutput{
+    bool delete_key = false;                    //whether to delete the key
+    std::optional<std::string> update_value;    //value to update the key
+    std::optional<std::string> return_value;    //value to return to the user, or err_message, if KVTProcessFunc returning false
+};
+
+typedef std::function<bool(
+    KVTProcessInput & input,
+    KVTProcessOutput & output)> KVTProcessFunc;
+
+//=============================================================================================
+//example: 
+
+    // //increment the value of a column
+    // bool conditional_increment_func(KVTProcessInput & input, KVTProcessOutput & output){
+    //     if (!input.parameter) return false;
+    //     uint64_t column_start = std::stoull(*input.parameter); //extract the column start from the parameter
+    //     if (input.value->size() < column_start + 8)
+    //         return false; //input value is too short to contain the column
+    //     //extract the current value from the row
+    //     std::string current_value_str = input.value->substr(column_start, 8);
+    //
+    //     //convert the current value to uint64_t
+    //     uint64_t current_column_value = *reinterpret_cast<const uint64_t *>(current_value_str.data());
+    //
+    //     //increment the current value
+    //     uint64_t new_column_value = current_column_value + 1;
+    //
+    //     output.update_value = *input.value; //get all the row data
+    //     //replace the current value with the new value
+    //     output.update_value->replace(column_start, 8, 
+    //                      std::string(reinterpret_cast<const char*>(&new_column_value), 8)); 
+    //     //return the current value 
+    //     output.return_value = std::string(reinterpret_cast<const char*>(&current_column_value), 8); 
+    //     return true;
+    // }
+
+    // //if the value contains the parameter, return the value and delete the key
+    // bool filter_value_func(KVTProcessInput & input, KVTProcessOutput & output){
+    //     if (!input.parameter) return false;
+    //     if (input.value->find(*input.parameter) != std::string::npos) {
+    //         output.return_value = *input.value;
+    //         output.delete_key = true;
+    //     }
+    //     return true;
+    // }
+
+    // //aggregate the value of a range, if the entry value is larger than the parameter
+    // bool conditional_aggregate_range_func(KVTProcessInput & input, KVTProcessOutput & output){
+    //     if (!input.parameter) return false;
+    //     uint64_t threshold = std::stoull(*input.parameter);
+    //     static uint64_t sum;
+    //     if (input.range_first) {
+    //         sum = 0;
+    //     }
+    //     uint64_t value = std::stoull(*input.value);
+    //     if (value > threshold)
+    //         sum += value;
+    //     if (input.range_last) {
+    //         output.return_value = std::to_string(sum);
+    //     }
+    //     return true;
+    // }
+
+//=============================================================================================
 
 
- /**
+
+/**
  * @param tx_id Transaction ID (0 for auto-commit/one-shot operation)
  * @param table_id ID of the table
- * @param key Key to update
- * @param func Function to update the value
+ * @param key input key and parameter
+ * @param func Function to update the value and return the result
  * @param parameter Parameter to pass to the function
- * @param result_value  value returned back to the user
+ * @param return_value  value returned back to the user
  * @param error_msg error message if fails, empty if success
  * @return KVTError::SUCCESS if successful, appropriate error code otherwise
  */
-KVTError kvt_update(uint64_t tx_id, 
+KVTError kvt_process(uint64_t tx_id, 
     uint64_t table_id,
     const KVTKey& key,
-    KVUpdateFunc & func,
+    const KVTProcessFunc& func,
     const std::string& parameter,
-    std::string& result_value,
+    std::string& return_value,
     std::string& error_msg);
 
 
@@ -340,16 +424,16 @@ KVTError kvt_update(uint64_t tx_id,
 * @param num_item_limit Maximum number of items to return
 * @param func Function to update the value
 * @param parameter Parameter to pass to the function
-* @param results Output parameter for key-value pairs found
+* @param results Output for key-value pairs found, the value will be updated by the function
 * @param error_msg error message if fails, empty if success
 * @return KVTError::SUCCESS if successful, appropriate error code otherwise
 */
-KVTError kvt_range_update(uint64_t tx_id, 
+KVTError kvt_range_process(uint64_t tx_id, 
         uint64_t table_id,
         const KVTKey& key_start,
         const KVTKey& key_end,
         size_t num_item_limit,
-        KVUpdateFunc & func,
+        const KVTProcessFunc& func,
         const std::string& parameter,
         std::vector<std::pair<KVTKey, std::string>>& results,
         std::string& error_msg);

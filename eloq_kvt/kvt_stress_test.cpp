@@ -145,12 +145,12 @@ private:
         return key / RANGE_SIZE;
     }
     
-    std::string key_to_string(int key) {
+    KVTKey key_to_string(int key) {
         // Zero-pad to 5 digits so string comparison matches numerical order
         // MAX_KEY is 10000, so we need 5 digits
         std::stringstream ss;
         ss << std::setfill('0') << std::setw(5) << key;
-        return ss.str();
+        return KVTKey(ss.str());
     }
     
     std::string value_to_string(int value) {
@@ -161,8 +161,8 @@ private:
         return std::stoi(str);
     }
     
-    int string_to_key(const std::string& str) {
-        return std::stoi(str);
+    int string_to_key(const KVTKey& str) {
+        return std::stoi(static_cast<const std::string&>(str));
     }
     
     // Ensure value stays within bounds
@@ -223,7 +223,7 @@ public:
         std::string error_msg;
         uint64_t tx_id = 0;
         // Scan entire key range
-        std::vector<std::pair<std::string, std::string>> all_results;
+        std::vector<std::pair<KVTKey, std::string>> all_results;
         KVTError result = kvt_scan(tx_id, table_id, key_to_string(0), 
                                key_to_string(MAX_KEY), MAX_KEY, all_results, error_msg);
         if (result != KVTError::SUCCESS)
@@ -343,7 +343,7 @@ public:
                 start_key = end_key;
                 end_key = tmp;
             }
-            std::vector<std::pair<std::string, std::string>> results;
+            std::vector<std::pair<KVTKey, std::string>> results;
             KVTError result = kvt_scan(ctx.tx_id, table_id, key_to_string(start_key), key_to_string(end_key), RANGE_SIZE, results, error_msg);
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to scan key: " << error_msg << std::endl;);

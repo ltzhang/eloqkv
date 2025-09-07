@@ -8,6 +8,7 @@ A high-performance, self-contained transactional key-value store with multiple c
 - **Multiple Concurrency Control**: Choose from Simple, 2PL, or OCC mechanisms
 - **Range Scans**: Efficient ordered key traversal with range partitioning support
 - **Batch Operations**: Execute multiple operations atomically within transactions
+- **Computation Push-Down**: Execute custom functions directly in the KVT layer for better performance
 - **Multi-Table Support**: Create and manage multiple independent tables
 - **Clean C API**: Simple, easy-to-use interface with comprehensive error handling
 
@@ -95,6 +96,11 @@ int main() {
 - `kvt_scan()` - Range scan (range-partitioned tables only)
 - `kvt_batch_execute()` - Execute multiple operations atomically
 
+### Computation Push-Down Operations
+
+- `kvt_process()` - Execute custom function on a single key
+- `kvt_range_process()` - Execute custom function on a range of keys
+
 ## Concurrency Control Mechanisms
 
 ### Simple Locking
@@ -113,6 +119,93 @@ int main() {
 - Validation at commit time
 - Best for read-heavy workloads
 
+## Computation Push-Down
+
+The KVT system supports computation push-down, allowing you to execute custom functions directly in the KVT layer. This avoids data copying and reduces serialization overhead, leading to better performance.
+
+### Single Key Processing (`kvt_process`)
+
+Execute custom functions on individual keys for operations like:
+- Atomic increment/decrement
+- Substring extraction
+- Conditional updates
+- Value transformations
+
+```cpp
+// Example: Atomic increment function
+bool atomic_increment_func(KVTProcessInput& input, KVTProcessOutput& output) {
+    try {
+        int current_value = std::stoi(*input.value);
+        int new_value = current_value + 1;
+        
+        output.update_value = std::to_string(new_value);
+        output.return_value = std::to_string(current_value);
+        return true;
+    } catch (const std::exception& e) {
+        output.return_value = "Error: Invalid integer value";
+        return false;
+    }
+}
+
+// Usage
+std::string parameter = "";
+std::string return_value;
+kvt_process(0, table_id, "counter", atomic_increment_func, parameter, return_value, error);
+```
+
+### Range Processing (`kvt_range_process`)
+
+Execute custom functions across ranges of keys for operations like:
+- Conditional filtering
+- Aggregation
+- Batch transformations
+
+```cpp
+// Example: Conditional delete function
+bool conditional_delete_func(KVTProcessInput& input, KVTProcessOutput& output) {
+    if (!input.parameter) return false;
+    if (input.value->find(*input.parameter) != std::string::npos) {
+        output.return_value = *input.value;
+        output.delete_key = true;
+    }
+    return true;
+}
+
+// Usage
+std::string parameter = "Wireless";
+std::vector<std::pair<KVTKey, std::string>> results;
+kvt_range_process(0, table_id, "prod:001", "prod:010", 10, 
+                  conditional_delete_func, parameter, results, error);
+```
+
+### Process Function Interface
+
+```cpp
+struct KVTProcessInput {
+    const KVTKey * key;                    // Current key
+    const std::string * value;            // Current value
+    const std::string * parameter;        // Optional parameter
+    bool range_first = true;              // First item in range
+    bool range_last = true;               // Last item in range
+};
+
+struct KVTProcessOutput {
+    bool delete_key = false;              // Whether to delete the key
+    std::optional<std::string> update_value;  // New value to set
+    std::optional<std::string> return_value;    // Value to return to user
+};
+
+typedef std::function<bool(KVTProcessInput&, KVTProcessOutput&)> KVTProcessFunc;
+```
+
+### Benefits
+
+1. **Performance**: Avoid data copying between layers
+2. **Efficiency**: Reduce serialization/deserialization overhead
+3. **Atomicity**: Operations execute within transaction boundaries
+4. **Flexibility**: Custom logic for complex operations
+5. **Consistency**: Maintains ACID properties
+
 ## Testing
 
 ### Sample Program (`kvt_sample.cpp`)
@@ -121,6 +214,7 @@ Demonstrates basic API usage including:
 - Transaction operations
 - CRUD operations
 - Range scans
+- Computation push-down operations (atomic increment, substring extraction, conditional filtering)
 - Error handling
 
 ### Stress Test (`kvt_stress_test.cpp`)
@@ -160,6 +254,7 @@ eloq_kvt/
    - Clean C-style interface
    - Comprehensive error codes
    - Batch operation support
+   - Computation push-down functions
 
 2. **Storage Engine** (`kvt_mem.h/cpp`)
    - In-memory storage with `std::map`
@@ -216,6 +311,11 @@ Check error messages for detailed diagnostics.
 3. **Use table IDs** instead of names for better performance
 
 4. **Minimize transaction duration** to reduce conflicts
+
+5. **Leverage computation push-down** for complex operations:
+   - Use `kvt_process` for single-key transformations
+   - Use `kvt_range_process` for range-based operations
+   - Avoid data copying by processing in-place
 
 ## Contributing
 

@@ -167,37 +167,37 @@ KVTError kvt_scan(uint64_t tx_id, uint64_t table_id, const KVTKey& key_start,
 }
 
 
-KVTError kvt_update(uint64_t tx_id, 
+KVTError kvt_process(uint64_t tx_id, 
                         uint64_t table_id,
                         const KVTKey& key,
-                        KVUpdateFunc & func,
+                        const KVTProcessFunc& func,
                         const std::string& parameter,
-                        std::string& result_value,
+                        std::string& return_value,
                         std::string& error_msg) 
 {
-    VERBOSE(std::cout << "kvt_update: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
-    KVTError result = kvt_manager().update(tx_id, table_id, key, func, parameter, result_value, error_msg);
+    VERBOSE(std::cout << "kvt_process: tx_id=" << tx_id << ", table_id=" << table_id << ", key=" << key);
+    KVTError result = kvt_manager().update(tx_id, table_id, key, func, parameter, return_value, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
         else
-            std::cout << " -> SUCCESS, result_value=" << result_value << std::endl;
+            std::cout << " -> SUCCESS, return_value=" << return_value << std::endl;
     );
     return result;
 }
 
-KVTError kvt_range_update(uint64_t tx_id, 
+KVTError kvt_range_process(uint64_t tx_id, 
                             uint64_t table_id,
                             const KVTKey& key_start,
                             const KVTKey& key_end,
                             size_t num_item_limit,
-                            KVUpdateFunc & func,
+                            const KVTProcessFunc& func,
                             const std::string& parameter,
                             std::vector<std::pair<KVTKey, std::string>>& results,
                             std::string& error_msg)
 {
-    VERBOSE(std::cout << "kvt_range_update: tx_id=" << tx_id << ", table_id=" << table_id << ", key_start=" << key_start << ", key_end=" << key_end << ", limit=" << num_item_limit);
-    KVTError result = kvt_manager().range_update(tx_id, table_id, key_start, key_end, num_item_limit, func, parameter, results, error_msg);
+    VERBOSE(std::cout << "kvt_range_process: tx_id=" << tx_id << ", table_id=" << table_id << ", key_start=" << key_start << ", key_end=" << key_end << ", limit=" << num_item_limit);
+    KVTError result = kvt_manager().range_process(tx_id, table_id, key_start, key_end, num_item_limit, func, parameter, results, error_msg);
     VERBOSE(
         if (result != KVTError::SUCCESS)
             std::cout << " -> ERROR: " << error_msg << std::endl;
