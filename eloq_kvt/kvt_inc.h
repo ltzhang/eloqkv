@@ -305,6 +305,7 @@ KVTError kvt_batch_execute(uint64_t tx_id,
     KVTBatchResults& batch_results,
     std::string& error_msg);
 
+    
 //=============================================================================================
 // The following interfaces are for computation push down. 
 // We can push down the computation to the KVT layer, 
@@ -319,14 +320,18 @@ struct KVTProcessInput{
     const KVTKey * key;
     const std::string * value;
     const std::string * parameter = nullptr;
-    bool range_first = true;  
-    bool range_last = true;
-    KVTProcessInput(const KVTKey * key, const std::string * value):
-                    key(key), value(value){}
+    
+    //whether it is the first item in the range, ignored by single item kvt_process, only for range operation
+    bool range_first = true;    
+    
+    //when scan finished (either reached the end or reached the limit), set to true 
+    //with nullptr key/value pair, return_value will be put into the error_msg if it has value
+    bool range_finished = false;  //ignored by single item kvt_process, only for range operation
+
     KVTProcessInput(const KVTKey * key, const std::string * value, const std::string * parameter):
                     key(key), value(value), parameter(parameter){}
-    KVTProcessInput(const KVTKey * key, const std::string * value, const std::string * parameter, bool range_first, bool range_last):
-                    key(key), value(value), parameter(parameter), range_first(range_first), range_last(range_last){}
+    KVTProcessInput(const KVTKey * key, const std::string * value, const std::string * parameter, bool range_first, bool range_finished):
+                    key(key), value(value), parameter(parameter), range_first(range_first), range_finished(range_finished){}
 };
 
 struct KVTProcessOutput{
@@ -368,6 +373,8 @@ typedef std::function<bool(
 
     // //if the value contains the parameter, return the value and delete the key
     // bool filter_value_func(KVTProcessInput & input, KVTProcessOutput & output){
+    //     if (input.range_finished) //don't do anything, the inputs are nullptr
+    //          return true;
     //     if (!input.parameter) return false;
     //     if (input.value->find(*input.parameter) != std::string::npos) {
     //         output.return_value = *input.value;
@@ -378,18 +385,19 @@ typedef std::function<bool(
 
     // //aggregate the value of a range, if the entry value is larger than the parameter
     // bool conditional_aggregate_range_func(KVTProcessInput & input, KVTProcessOutput & output){
+    //     static uint64_t sum;
+    //     if (input.range_finished) {
+    //         output.return_value = std::to_string(sum);
+    //         return true;
+    //     }
     //     if (!input.parameter) return false;
     //     uint64_t threshold = std::stoull(*input.parameter);
-    //     static uint64_t sum;
     //     if (input.range_first) {
     //         sum = 0;
     //     }
     //     uint64_t value = std::stoull(*input.value);
     //     if (value > threshold)
     //         sum += value;
-    //     if (input.range_last) {
-    //         output.return_value = std::to_string(sum);
-    //     }
     //     return true;
     // }
 
