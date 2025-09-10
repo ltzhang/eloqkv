@@ -44,10 +44,6 @@ extern int g_sanity_check_level;
 extern int g_verbosity;
 extern int g_sanity_check_level;
 
-// Compile-time flag for text logging
-// Uncomment to enable text mode logging
-// #define LOG_TEXT_MODE 1
-
 class KVTLogger 
 {
     private:
@@ -100,9 +96,11 @@ class KVTLogger
         }
 
     public:
-        KVTLogger(const std::string& file_name, bool text_mode = false, bool write_to_file = true, bool do_fsync = false) 
+        KVTLogger(const std::string& file_name, bool text_mode = false, bool write_to_file = true, bool do_fsync = false, 
+                  size_t log_size_limit = 0, size_t keep_history = 0) 
             : log_as_text_(text_mode), write_to_file_(write_to_file), do_fsync_(do_fsync), next_log_id_(1) {
             total_size_ = 0;
+            // Note: log_size_limit and keep_history are handled by KVTWrapper, not KVTLogger
             if (write_to_file_) {
                 ofs_.open(file_name, std::ios::out | std::ios::app | std::ios::binary);
                 if (!ofs_.is_open()) {
@@ -163,13 +161,6 @@ class KVTLogger
             total_size_ += payload.length();
             current_entry_buffer_.str("");
             current_entry_buffer_.clear();
-        }
-        
-        // Read a log entry from file (requires reopening file in read mode)
-        bool read_entry(uint64_t& log_id, std::string& payload) {
-            // This method is not implemented for reading from the same file
-            // It should be used with a separate ifstream for reading
-            return false;
         }
         
         // Static method to read entries from a log file
@@ -268,11 +259,6 @@ class KVTLogger
             return total_size_;
         }
 
-        // Check if file is open
-        bool is_open() const {
-            return ofs_.is_open();
-        }
-        
         // Close the log file
         void close() {
             if (write_to_file_ && ofs_.is_open()) {
@@ -285,18 +271,15 @@ class KVTLogger
 class KVTWrapper
 {
     private:
-        size_t check_point_id_;  // Next checkpoint to create (starts at 1)
-        size_t log_id_;          // Current log file (starts at 0)
+        size_t check_point_id_;  // Current checkpoint/log ID (checkpoint N uses log N-1, starts at 1)
         std::unique_ptr<KVTLogger> logger_;
 
-        size_t total_transactions_;
-        
-        // Runtime configurable checkpoint parameters
+        // Configurable checkpoint parameters
         bool persist_;                // Whether to persist to disk
         bool do_fsync_;               // Whether to fsync after writes
-        size_t checkpoint_period_;    // Number of transactions between checkpoints
         size_t log_size_limit_;       // Maximum log size before checkpoint (in bytes)
         size_t keep_history_;         // Number of old checkpoints to keep
+        bool text_log_;               // Whether to use text log format
 
         std::string data_path_;
 
@@ -366,27 +349,25 @@ class KVTWrapper
     public:
         KVTWrapper(std::string data_path = "./") : data_path_(data_path) {
             check_point_id_ = 1;
-            log_id_ = 0;
-            total_transactions_ = 0;
             
             // Default checkpoint parameters (suitable for production)
             persist_ = true;                 // Persist to disk by default
             do_fsync_ = false;               // Don't fsync by default (for performance)
-            checkpoint_period_ = 1000;      // Checkpoint every 1000 transactions
-            log_size_limit_ = 10 * 1024 * 1024;  // 10MB log size limit
+            log_size_limit_ = 16 * 1024 * 1024;  // 10MB log size limit
             keep_history_ = 5;               // Keep 5 old checkpoints
+            text_log_ = false;               // Use binary log format by default
             // Note: startup() must be called after the derived class is fully constructed
         }
         // Virtual destructor to ensure proper cleanup of derived classes
         virtual ~KVTWrapper() = default;
         
         // Methods to configure checkpoint parameters (must be called before startup)
-        void set_checkpoint_period(size_t period) { checkpoint_period_ = period; }
-        void set_log_size_limit(size_t limit) { log_size_limit_ = limit; }
-        void set_keep_history(size_t count) { keep_history_ = count; }
-        void set_persist_params(bool persist, bool do_fsync) { 
+        void set_persist_params(bool persist, bool do_fsync, size_t log_size_limit, size_t keep_history, bool text_log) { 
             persist_ = persist; 
             do_fsync_ = do_fsync;
+            log_size_limit_ = log_size_limit;
+            keep_history_ = keep_history;
+            text_log_ = text_log;
         }
 
         void startup() {
@@ -415,7 +396,6 @@ class KVTWrapper
             if (current_check_point_id == -1) {
                 std::cout << "No checkpoint found, Trying to Replay Log" << std::endl;
                 check_point_id_ = 1;
-            log_id_ = 0;
             } else {
                 std::cout << "KVT Store continue from checkpoint " << current_check_point_id << std::endl;
                 if (!load_checkpoint(get_checkpoint_name(current_check_point_id))){
@@ -447,9 +427,8 @@ class KVTWrapper
             if (current_check_point_id == -1) {
                 // No checkpoint found
                 check_point_id_ = 1;
-            log_id_ = 0;
                 if (current_log_id != -1) {
-                    // But we have a log file, replay it
+                    // But we have a log file, replay it (log 0 for checkpoint 1)
                     if (std::filesystem::exists(get_logfile_name(0))) {
                         std::cout << "Replaying log file: " << get_logfile_name(0) << std::endl;
                         if (!replay_log(get_logfile_name(0))) {
@@ -462,38 +441,29 @@ class KVTWrapper
                 }
             } else {
                 // Checkpoint found, use it
-                // Checkpoint N is created from log 0 through log N-1
-                // So we need to replay log N to get to the state after checkpoint N
+                // Checkpoint N was created from log N-1, so we replay log N-1
                 check_point_id_ = current_check_point_id;
-                log_id_ = current_check_point_id;  // Log N corresponds to checkpoint N
                 
-                // Replay the log file with same number as checkpoint
-                if (std::filesystem::exists(get_logfile_name(log_id_))) {
-                    std::cout << "Replaying log " << log_id_ << " (for checkpoint " << check_point_id_ << ")" << std::endl;
-                    if (!replay_log(get_logfile_name(log_id_))) {
-                        std::cout << "Failed to replay log " << log_id_ << std::endl;
+                // Replay the log file for this checkpoint (log N-1 for checkpoint N)
+                size_t log_to_replay = check_point_id_ - 1;
+                if (std::filesystem::exists(get_logfile_name(log_to_replay))) {
+                    std::cout << "Replaying log " << log_to_replay << " (for checkpoint " << check_point_id_ << ")" << std::endl;
+                    if (!replay_log(get_logfile_name(log_to_replay))) {
+                        std::cout << "Failed to replay log " << log_to_replay << std::endl;
                         exit(1);
                     }
                 }
                 
                 // After replay, we're ready for next checkpoint
                 check_point_id_ = current_check_point_id + 1;
-                log_id_ = current_check_point_id;
             }
             
-            // Always open log file for writing
-            std::string log_file_name_str = get_logfile_name(log_id_);
+            // Always open log file for writing (log N-1 for checkpoint N)
+            std::string log_file_name_str = get_logfile_name(check_point_id_ - 1);
             std::cout << "DEBUG: Opening log file: " << log_file_name_str << std::endl;
             
-            // Check compile-time flag for text mode
-            bool use_text_mode = false;
-#ifdef LOG_TEXT_MODE
-            use_text_mode = true;
-            std::cout << "Using TEXT format for logging" << std::endl;
-#endif
-            
             try {
-                logger_ = std::make_unique<KVTLogger>(log_file_name_str, use_text_mode, persist_, do_fsync_);
+                logger_ = std::make_unique<KVTLogger>(log_file_name_str, text_log_, persist_, do_fsync_, log_size_limit_, keep_history_);
                 std::cout << "DEBUG: Log file opened successfully" << std::endl;
             } catch (const std::exception& e) {
                 std::cout << "Failed to open log file: " << log_file_name_str << " - " << e.what() << std::endl;
@@ -719,37 +689,20 @@ class KVTWrapper
 
         void try_check_point()
         {
-            total_transactions_++;
-            
-            // Trigger checkpoint if EITHER condition is met
-            bool should_checkpoint = false;
-            if (total_transactions_ % checkpoint_period_ == 0) {
-                std::cout << "Checkpoint triggered by transaction count: " << total_transactions_ << std::endl;
-                should_checkpoint = true;
-            }
-            if (logger_->get_total_payload_size() >= log_size_limit_) {
-                std::cout << "Checkpoint triggered by log size: " << logger_->get_total_payload_size() << " bytes" << std::endl;
-                should_checkpoint = true;
-            }
-            
-            if (!should_checkpoint) {
-                return;
-            }
+            if (!persist_ || logger_->get_total_payload_size() <= log_size_limit_)
+                return; 
+
             save_checkpoint(get_checkpoint_name(check_point_id_));
             logger_->close();
             
-            // After checkpoint N, start log N
-            log_id_ = check_point_id_;
+            // Move to next checkpoint
             check_point_id_++;
             
+            // Open new log file (log N-1 for checkpoint N)
             try {
-                bool use_text_mode = false;
-#ifdef LOG_TEXT_MODE
-                use_text_mode = true;
-#endif
-                logger_ = std::make_unique<KVTLogger>(get_logfile_name(log_id_), use_text_mode, persist_, do_fsync_);
+                logger_ = std::make_unique<KVTLogger>(get_logfile_name(check_point_id_ - 1), text_log_, persist_, do_fsync_, log_size_limit_, keep_history_);
             } catch (const std::exception& e) {
-                std::cout << "Failed to open log file: " << get_logfile_name(log_id_) << " - " << e.what() << std::endl;
+                std::cout << "Failed to open log file: " << get_logfile_name(check_point_id_ - 1) << " - " << e.what() << std::endl;
                 exit(1);
             }
             for (size_t i = 0; i< 10; ++i){

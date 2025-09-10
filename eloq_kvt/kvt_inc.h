@@ -466,14 +466,4 @@ KVTError kvt_commit_transaction(uint64_t tx_id,
 KVTError kvt_rollback_transaction(uint64_t tx_id, 
                                   std::string& error_msg);
 
-/**
- * Configure all persist parameters at once (must be called before kvt_initialize)
- * @param persist Whether to persist to disk
- * @param check_period Number of transactions between checkpoints
- * @param log_size_limit Maximum log size in bytes before checkpoint
- * @param keep_history_count Number of old checkpoints to keep
- */
-void kvt_set_persist_param(bool persist, size_t check_period, size_t log_size_limit, size_t keep_history_count);
-
-
 #endif // KVT_INC_H

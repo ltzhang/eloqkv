@@ -8,12 +8,6 @@ std::unique_ptr<KVTWrapper> g_kvt_manager;
 int g_verbosity = 0;
 int g_sanity_check_level = 0;
 
-// Checkpoint configuration parameters (used before initialization)
-static bool g_persist = true;           // Whether to persist to disk (default: true)
-static size_t g_checkpoint_period = 0;  // 0 means use default
-static size_t g_log_size_limit = 0;     // 0 means use default
-static size_t g_keep_history = 0;       // 0 means use default
-
 KVTError kvt_set_verbosity(int verbosity) {
     g_verbosity = verbosity;
     return KVTError::SUCCESS;
@@ -22,6 +16,12 @@ KVTError kvt_set_verbosity(int verbosity) {
 KVTError kvt_set_sanity_check_level(int level) {
     g_sanity_check_level = level;
     return KVTError::SUCCESS;
+}
+
+void kvt_set_persist_param(bool persist, size_t log_size_limit, size_t keep_history_count, bool text_log) {
+    if (g_kvt_manager) 
+        g_kvt_manager->set_persist_params(persist, false, log_size_limit, 
+                            keep_history_count, text_log); // fsync is always false for now
 }
 
 // Global KVT interface functions
@@ -36,17 +36,6 @@ KVTError kvt_initialize() {
         g_kvt_manager = std::make_unique<KVTMemManagerOCC>(); // Create simple wrapper
         
         // Apply persist and checkpoint configuration if set
-        g_kvt_manager->set_persist_params(g_persist, false); // fsync is always false for now
-        if (g_checkpoint_period > 0) {
-            g_kvt_manager->set_checkpoint_period(g_checkpoint_period);
-        }
-        if (g_log_size_limit > 0) {
-            g_kvt_manager->set_log_size_limit(g_log_size_limit);
-        }
-        if (g_keep_history > 0) {
-            g_kvt_manager->set_keep_history(g_keep_history);
-        }
-        
         //read from environment variable KVT_VERBOSITY
         const char* verbosity = getenv("KVT_VERBOSITY");
         if (verbosity) {
@@ -68,16 +57,8 @@ void kvt_shutdown() {
         g_kvt_manager.reset();
 }
 
-void kvt_set_persist_param(bool persist, size_t check_period, size_t log_size_limit, size_t keep_history_count) 
-{
-    g_persist = persist;
-    g_checkpoint_period = check_period;
-    g_log_size_limit = log_size_limit;
-    g_keep_history = keep_history_count;
-}
-
 KVTWrapper& kvt_manager() {
-    if (g_kvt_manager == nullptr) {
+    if (!g_kvt_manager) {
         std::cerr << "^^^Warning: kvt_manager() is called before kvt_initialize()" << std::endl;
         kvt_initialize();
     }

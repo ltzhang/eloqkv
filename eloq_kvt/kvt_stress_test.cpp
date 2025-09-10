@@ -777,7 +777,7 @@ int main(int argc, char* argv[]) {
     
     // Configure checkpoint parameters for stress testing
     if (ENABLE_CRASH_SIMULATION) {
-        kvt_set_persist_param(true, 5, 500, 2);  // persist=true, checkpoint_period=5, log_size=500, keep_history=2
+        kvt_set_persist_param(true, 500, 2, false);  // persist=true, log_size=500, keep_history=2, text_log=false
         std::cout << "Using small checkpoint parameters for crash testing" << std::endl;
     }
     
