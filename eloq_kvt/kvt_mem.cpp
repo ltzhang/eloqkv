@@ -8,6 +8,12 @@ std::unique_ptr<KVTWrapper> g_kvt_manager;
 int g_verbosity = 0;
 int g_sanity_check_level = 0;
 
+// Checkpoint configuration parameters (used before initialization)
+static bool g_persist = true;           // Whether to persist to disk (default: true)
+static size_t g_checkpoint_period = 0;  // 0 means use default
+static size_t g_log_size_limit = 0;     // 0 means use default
+static size_t g_keep_history = 0;       // 0 means use default
+
 KVTError kvt_set_verbosity(int verbosity) {
     g_verbosity = verbosity;
     return KVTError::SUCCESS;
@@ -20,11 +26,37 @@ KVTError kvt_set_sanity_check_level(int level) {
 
 // Global KVT interface functions
 KVTError kvt_initialize() {
+    if(g_kvt_manager) {
+        return KVTError::SUCCESS;
+    }
     try {
         //g_kvt_manager = std::make_unique<KVTMemManagerNoCC>(); // Create simple wrapper
         //g_kvt_manager = std::make_unique<KVTMemManagerSimple>(); // Create simple wrapper
         //g_kvt_manager = std::make_unique<KVTMemManager2PL>(); // Create simple wrapper
         g_kvt_manager = std::make_unique<KVTMemManagerOCC>(); // Create simple wrapper
+        
+        // Apply persist and checkpoint configuration if set
+        g_kvt_manager->set_persist_params(g_persist, false); // fsync is always false for now
+        if (g_checkpoint_period > 0) {
+            g_kvt_manager->set_checkpoint_period(g_checkpoint_period);
+        }
+        if (g_log_size_limit > 0) {
+            g_kvt_manager->set_log_size_limit(g_log_size_limit);
+        }
+        if (g_keep_history > 0) {
+            g_kvt_manager->set_keep_history(g_keep_history);
+        }
+        
+        //read from environment variable KVT_VERBOSITY
+        const char* verbosity = getenv("KVT_VERBOSITY");
+        if (verbosity) {
+            g_verbosity = atoi(verbosity);
+        }
+        //read from environment variable KVT_SANITY_CHECK_LEVEL
+        const char* sanity_check_level = getenv("KVT_SANITY_CHECK_LEVEL");
+        if (sanity_check_level) {
+            g_sanity_check_level = atoi(sanity_check_level);
+        }
         return KVTError::SUCCESS;
     } catch (const std::exception& e) {
         return KVTError::UNKNOWN_ERROR;
@@ -32,7 +64,16 @@ KVTError kvt_initialize() {
 }
 
 void kvt_shutdown() {
-    g_kvt_manager.reset();
+    if (g_kvt_manager)
+        g_kvt_manager.reset();
+}
+
+void kvt_set_persist_param(bool persist, size_t check_period, size_t log_size_limit, size_t keep_history_count) 
+{
+    g_persist = persist;
+    g_checkpoint_period = check_period;
+    g_log_size_limit = log_size_limit;
+    g_keep_history = keep_history_count;
 }
 
 KVTWrapper& kvt_manager() {
@@ -286,82 +327,7 @@ KVTError kvt_batch_execute(uint64_t tx_id, const KVTBatchOps& batch_ops,
 
 //=============================================================================================
 
-// Table management
-KVTError KVTMemManagerNoCC::create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg) {
-    std::lock_guard<std::mutex> lock(global_mutex);
-    if (table_to_id.find(table_name) != table_to_id.end()) {
-        error_msg = "Table " + table_name + " already exists";
-        return KVTError::TABLE_ALREADY_EXISTS;
-    }
-    table_to_id[table_name] = next_table_id;
-    std::cout << "create_table " << table_name << " as TableID" << next_table_id << std::endl;
-    next_table_id += 1;
-    table_id = next_table_id - 1;
-    return KVTError::SUCCESS;
-}
-
-KVTError KVTMemManagerNoCC::drop_table(uint64_t table_id, std::string& error_msg) {
-    std::lock_guard<std::mutex> lock(global_mutex);
-    std::string table_name;
-    for (const auto& pair : table_to_id) {
-        if (pair.second == table_id) {
-            table_name = pair.first;
-            break;
-        }
-    }
-    if (table_name.empty()) {
-        error_msg = "Table with ID " + std::to_string(table_id) + " not found";
-        return KVTError::TABLE_NOT_FOUND;
-    }
-    
-    // Remove all data associated with this table
-    auto it = table_data.begin();
-    while (it != table_data.end()) {
-        std::pair<uint64_t, std::string> parsed = parse_table_key(it->first);
-        if (parsed.first == table_id) {
-            it = table_data.erase(it);
-        } else {
-            ++it;
-        }
-    }
-    
-    // Remove table from table_to_id map
-    table_to_id.erase(table_name);
-    std::cout << "drop_table " << table_name << std::endl;
-    return KVTError::SUCCESS;
-}
-
-KVTError KVTMemManagerNoCC::get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg) {
-    std::lock_guard<std::mutex> lock(global_mutex);
-    for (const auto& pair : table_to_id) {
-        if (pair.second == table_id) {
-            table_name = pair.first;
-            return KVTError::SUCCESS;
-        }
-    }
-    error_msg = "Table with ID " + std::to_string(table_id) + " not found";
-    return KVTError::TABLE_NOT_FOUND;
-}
-
-KVTError KVTMemManagerNoCC::get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg) {
-    std::lock_guard<std::mutex> lock(global_mutex);
-    auto it = table_to_id.find(table_name);
-    if (it == table_to_id.end()) {
-        error_msg = "Table " + table_name + " not found";
-        return KVTError::TABLE_NOT_FOUND;
-    }
-    table_id = it->second;
-    return KVTError::SUCCESS;
-}
-
-KVTError KVTMemManagerNoCC::list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg) {
-    std::lock_guard<std::mutex> lock(global_mutex);
-    results.clear();
-    for (const auto& pair : table_to_id) {
-        results.emplace_back(pair.first, pair.second);
-    }
-    return KVTError::SUCCESS;
-}
+// Transaction management
 KVTError KVTMemManagerNoCC::start_transaction(uint64_t& tx_id, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
     std::cout << "start_transaction " << next_tx_id << std::endl;
@@ -389,7 +355,7 @@ KVTError KVTMemManagerNoCC::get(uint64_t tx_id, uint64_t table_id, const KVTKey&
 
     // Check if table_id exists
     bool table_exists = false;
-    for (const auto& pair : table_to_id) {
+    for (const auto& pair : tablename_to_id) {
         if (pair.second == table_id) {
             table_exists = true;
             break;
@@ -421,7 +387,7 @@ KVTError KVTMemManagerNoCC::set(uint64_t tx_id, uint64_t table_id, const KVTKey&
     
     // Check if table_id exists
     bool table_exists = false;
-    for (const auto& pair : table_to_id) {
+    for (const auto& pair : tablename_to_id) {
         if (pair.second == table_id) {
             table_exists = true;
             break;
@@ -448,7 +414,7 @@ KVTError KVTMemManagerNoCC::del(uint64_t tx_id, uint64_t table_id,
     
     // Check if table_id exists
     bool table_exists = false;
-    for (const auto& pair : table_to_id) {
+    for (const auto& pair : tablename_to_id) {
         if (pair.second == table_id) {
             table_exists = true;
             break;
@@ -483,7 +449,7 @@ KVTError KVTMemManagerNoCC::scan(uint64_t tx_id, uint64_t table_id, const KVTKey
     
     // Check if table_id exists
     bool table_exists = false;
-    for (const auto& pair : table_to_id) {
+    for (const auto& pair : tablename_to_id) {
         if (pair.second == table_id) {
             table_exists = true;
             break;
@@ -512,85 +478,6 @@ KVTError KVTMemManagerNoCC::scan(uint64_t tx_id, uint64_t table_id, const KVTKey
 }
 
 //==================================KVT ManagerWrapperSimple ===========================================================
-
-KVTError KVTMemManagerSimple::create_table(const std::string& table_name, const std::string& partition_method, uint64_t& table_id, std::string& error_msg)
-{
-    std::lock_guard<std::mutex> lock(global_mutex);
-    if (table_to_id.find(table_name) != table_to_id.end()) {
-        error_msg = "Table " + table_name + " already exists";
-        return KVTError::TABLE_ALREADY_EXISTS;
-    }
-    table_to_id[table_name] = next_table_id;
-    next_table_id += 1;
-    table_id = next_table_id - 1;
-    return KVTError::SUCCESS;
-}
-
-KVTError KVTMemManagerSimple::drop_table(uint64_t table_id, std::string& error_msg)
-{
-    std::lock_guard<std::mutex> lock(global_mutex);
-    std::string table_name;
-    for (const auto& pair : table_to_id) {
-        if (pair.second == table_id) {
-            table_name = pair.first;
-            break;
-        }
-    }
-    if (table_name.empty()) {
-        error_msg = "Table with ID " + std::to_string(table_id) + " not found";
-        return KVTError::TABLE_NOT_FOUND;
-    }
-    
-    // Remove all data associated with this table
-    auto it = table_data.begin();
-    while (it != table_data.end()) {
-        std::pair<uint64_t, std::string> parsed = parse_table_key(it->first);
-        if (parsed.first == table_id) {
-            it = table_data.erase(it);
-        } else {
-            ++it;
-        }
-    }
-    
-    // Remove table from table_to_id map
-    table_to_id.erase(table_name);
-    return KVTError::SUCCESS;
-}
-
-KVTError KVTMemManagerSimple::get_table_name(uint64_t table_id, std::string& table_name, std::string& error_msg)
-{
-    std::lock_guard<std::mutex> lock(global_mutex);
-    for (const auto& pair : table_to_id) {
-        if (pair.second == table_id) {
-            table_name = pair.first;
-            return KVTError::SUCCESS;
-        }
-    }
-    error_msg = "Table with ID " + std::to_string(table_id) + " not found";
-    return KVTError::TABLE_NOT_FOUND;
-}
-
-KVTError KVTMemManagerSimple::get_table_id(const std::string& table_name, uint64_t& table_id, std::string& error_msg)
-{
-    std::lock_guard<std::mutex> lock(global_mutex);
-    auto it = table_to_id.find(table_name);
-    if (it == table_to_id.end()) {
-        error_msg = "Table " + table_name + " not found";
-        return KVTError::TABLE_NOT_FOUND;
-    }
-    table_id = it->second;
-    return KVTError::SUCCESS;
-}
-
-KVTError KVTMemManagerSimple::list_tables(std::vector<std::pair<std::string, uint64_t>>& results, std::string& error_msg)
-{
-    std::lock_guard<std::mutex> lock(global_mutex);
-    results.clear();
-    for (const auto& pair : table_to_id) {
-        results.emplace_back(pair.first, pair.second);
-    }
-    return KVTError::SUCCESS;
-}
 
 KVTError KVTMemManagerSimple::start_transaction(uint64_t& tx_id, std::string& error_msg) {
     std::lock_guard<std::mutex> lock(global_mutex);
@@ -645,7 +532,7 @@ KVTError KVTMemManagerSimple::get(uint64_t tx_id, uint64_t table_id, const KVTKe
     
     // Check if table_id exists
     bool table_exists = false;
-    for (const auto& pair : table_to_id) {
+    for (const auto& pair : tablename_to_id) {
         if (pair.second == table_id) {
             table_exists = true;
             break;
@@ -689,7 +576,7 @@ KVTError KVTMemManagerSimple::set(uint64_t tx_id, uint64_t table_id, const KVTKe
     
     // Check if table_id exists
     bool table_exists = false;
-    for (const auto& pair : table_to_id) {
+    for (const auto& pair : tablename_to_id) {
         if (pair.second == table_id) {
             table_exists = true;
             break;
@@ -722,7 +609,7 @@ KVTError KVTMemManagerSimple::del(uint64_t tx_id, uint64_t table_id, const KVTKe
     
     // Check if table_id exists
     bool table_exists = false;
-    for (const auto& pair : table_to_id) {
+    for (const auto& pair : tablename_to_id) {
         if (pair.second == table_id) {
             table_exists = true;
             break;
@@ -763,7 +650,7 @@ KVTError KVTMemManagerSimple::scan(uint64_t tx_id, uint64_t table_id, const KVTK
     
     // Check if table_id exists
     bool table_exists = false;
-    for (const auto& pair : table_to_id) {
+    for (const auto& pair : tablename_to_id) {
         if (pair.second == table_id) {
             table_exists = true;
             break;

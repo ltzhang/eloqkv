@@ -26,7 +26,13 @@ const int INITIAL_KEYS = 2000;  // Back to normal
 const int CONSISTENCY_CHECK_INTERVAL = 100;
 const int MAX_CONCURRENT_TXS = 10;
 const double COMMIT_RATIO = 0.7; // 70% commit, 30% abort
-const int CONSTRAINT_DIVISOR = 100; 
+const int CONSTRAINT_DIVISOR = 100;
+
+// Logging and crash simulation configuration
+const bool ENABLE_LOGGING = true;  // Enable/disable logging
+const bool ENABLE_CRASH_SIMULATION = true;  // Enable random crashes
+const double CRASH_PROBABILITY = 0.01;  // Probability of crash per transaction (1% chance)
+const int MIN_TXS_BEFORE_CRASH = 50;  // Minimum transactions before allowing crash 
 
 // Test modes
 enum TestMode {
@@ -139,6 +145,8 @@ private:
     std::atomic<int> commit_count{0};
     std::atomic<int> abort_count{0};
     std::atomic<bool> test_running{true};
+    std::atomic<int> total_transaction_count{0};  // Total across all runs
+    std::atomic<int> crash_count{0};  // Number of simulated crashes
     
     // Helper functions
     int get_range_id(int key) {
@@ -169,6 +177,58 @@ private:
     int clamp_value(int value) {
         assert (MAX_VALUE % CONSTRAINT_DIVISOR == 0);
         return value % MAX_VALUE;
+    }
+    
+    void simulate_crash_and_recovery() {
+        crash_count++;
+        std::cout << "\n*** SIMULATING CRASH #" << crash_count << " ***" << std::endl;
+        std::cout << "Total transactions before crash: " << total_transaction_count << std::endl;
+        
+        // Shutdown without explicit cleanup (simulating crash)
+        kvt_shutdown();
+        
+        // Restart the system (will load from checkpoint + log)
+        std::cout << "*** RESTARTING SYSTEM (Recovery) ***" << std::endl;
+        KVTError init_result = kvt_initialize();
+        if (init_result != KVTError::SUCCESS) {
+            PANIC(std::cerr << "Failed to reinitialize after crash!" << std::endl);
+        }
+        
+        // Re-get the table ID
+        std::string error_msg;
+        KVTError result = kvt_get_table_id(table_name, table_id, error_msg);
+        if (result != KVTError::SUCCESS) {
+            // Table might not exist yet if we crashed before creating it
+            result = kvt_create_table(table_name, "hash", table_id, error_msg);
+            if (result != KVTError::SUCCESS && result != KVTError::TABLE_ALREADY_EXISTS) {
+                PANIC(std::cerr << "Failed to recreate table after recovery: " << error_msg << std::endl);
+            }
+        }
+        
+        std::cout << "*** RECOVERY COMPLETE ***" << std::endl;
+        
+        // Verify consistency after recovery
+        if (!check_consistency("after crash recovery")) {
+            PANIC(std::cerr << "FATAL: Consistency violated after crash recovery!" << std::endl);
+        }
+        std::cout << "Consistency verified after recovery" << std::endl;
+    }
+    
+    bool should_simulate_crash() {
+        if (!ENABLE_CRASH_SIMULATION) return false;
+        if (total_transaction_count < MIN_TXS_BEFORE_CRASH) return false;
+        
+        double rand_val = main_rng.rand_double(0.0, 1.0);
+        return rand_val < CRASH_PROBABILITY;
+    }
+    
+    void check_and_simulate_crash_on_operation() {
+        // Check for crash after each operation (not just at transaction boundaries)
+        if (should_simulate_crash()) {
+            simulate_crash_and_recovery();
+            // After crash, we need to throw an exception to stop current execution
+            throw std::runtime_error("Simulated crash during operation");
+        }
     }
     
 public:
@@ -325,6 +385,7 @@ public:
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to set key: " << error_msg << std::endl;);
             ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
+            check_and_simulate_crash_on_operation();  // Check for crash after operation
         } 
         else if (prob < 0.9) { //del
             int key = try_get_key(ctx, range_id, true);
@@ -334,6 +395,7 @@ public:
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to delete key: " << error_msg << std::endl;);
             ctx.append_op({TransactionContext::Operation::OP_DEL, key, 0, 0, 0});
+            check_and_simulate_crash_on_operation();  // Check for crash after operation
         } 
         else { //scan does not need to care about range
             int start_key = ctx.rng->rand_int(0, MAX_KEY - 1);
@@ -450,9 +512,28 @@ public:
         auto start_time = std::chrono::steady_clock::now();
         
         for (int i = 0; i < num_transactions; i++) {
-            TransactionContext ctx = create_transaction_context();
-            run_single_transaction_normal(ctx);
-            transaction_count++;
+            try {
+                TransactionContext ctx = create_transaction_context();
+                run_single_transaction_normal(ctx);
+                transaction_count++;
+                total_transaction_count++;
+                
+                // Check for crash simulation at transaction boundary
+                if (should_simulate_crash()) {
+                    simulate_crash_and_recovery();
+                    // Reset local counters after crash
+                    transaction_count = 0;
+                    commit_count = 0;
+                    abort_count = 0;
+                }
+            } catch (const std::runtime_error& e) {
+                // Crash occurred during operation
+                // Reset local counters after crash
+                transaction_count = 0;
+                commit_count = 0;
+                abort_count = 0;
+            }
+            
             // Periodic consistency check
             if ((i + 1) % CONSISTENCY_CHECK_INTERVAL == 0) {
                 if (!check_consistency("transaction " + std::to_string(i + 1))) {
@@ -511,9 +592,27 @@ public:
                 }
                 completed++;
                 transaction_count++;
-                // Clean up RNG
-                delete ctx.rng;
-                active_contexts.erase(active_contexts.begin() + idx);
+                total_transaction_count++;
+                
+                // Check for crash simulation
+                if (should_simulate_crash()) {
+                    // Clean up active contexts before crash
+                    for (auto& ac : active_contexts) {
+                        delete ac->second.rng;
+                    }
+                    active_contexts.clear();
+                    
+                    simulate_crash_and_recovery();
+                    // Reset local counters after crash
+                    transaction_count = 0;
+                    commit_count = 0;
+                    abort_count = 0;
+                } else {
+                    // Clean up RNG
+                    delete ctx.rng;
+                    active_contexts.erase(active_contexts.begin() + idx);
+                }
+                
                 // Periodic consistency check
                 if (completed % CONSISTENCY_CHECK_INTERVAL == 0) {
                     if (!check_consistency("interleaved " + std::to_string(completed))) {
@@ -608,10 +707,16 @@ public:
     void run_all_tests() {
         std::cout << "\n========================================" << std::endl;
         std::cout << "    KVT COMPREHENSIVE STRESS TEST" << std::endl;
+        std::cout << "    Logging: " << (ENABLE_LOGGING ? "ENABLED" : "DISABLED") << std::endl;
+        std::cout << "    Crash Simulation: " << (ENABLE_CRASH_SIMULATION ? "ENABLED" : "DISABLED") << std::endl;
+        if (ENABLE_CRASH_SIMULATION) {
+            std::cout << "    Crash Probability: " << (CRASH_PROBABILITY * 100) << "%" << std::endl;
+            std::cout << "    Min TXs before crash: " << MIN_TXS_BEFORE_CRASH << std::endl;
+        }
         std::cout << "========================================" << std::endl;
         
         // Test 1: Non-interleaved
-        run_non_interleaved(100);  // Full test
+        run_non_interleaved(ENABLE_CRASH_SIMULATION ? 100 : 100);  // Small test for crash simulation
         
         // Final consistency check
         if (!check_consistency("after non-interleaved")) {
@@ -620,7 +725,7 @@ public:
         }
         
         // Test 2: Interleaved
-        run_interleaved(200);
+        run_interleaved(ENABLE_CRASH_SIMULATION ? 1000 : 200);  // More transactions if crash testing
         
         // Final consistency check
         if (!check_consistency("after interleaved")) {
@@ -628,8 +733,12 @@ public:
             return;
         }
         
-        // Test 3: Multi-threaded
-        run_multi_threaded_test(4, 500);
+        // Test 3: Multi-threaded (skip if crash simulation enabled for simplicity)
+        if (!ENABLE_CRASH_SIMULATION) {
+            run_multi_threaded_test(4, 500);
+        } else {
+            std::cout << "\n(Skipping multi-threaded test with crash simulation for simplicity)" << std::endl;
+        }
         
         // Final consistency check
         if (!check_consistency("final")) {
@@ -639,6 +748,10 @@ public:
         
         std::cout << "\n========================================" << std::endl;
         std::cout << "    ALL TESTS COMPLETED SUCCESSFULLY!" << std::endl;
+        if (ENABLE_CRASH_SIMULATION) {
+            std::cout << "    Total simulated crashes: " << crash_count << std::endl;
+            std::cout << "    Total transactions: " << total_transaction_count << std::endl;
+        }
         std::cout << "========================================" << std::endl;
     }
 };
@@ -661,6 +774,12 @@ void test_implementation(const std::string& impl_name) {
 int main(int argc, char* argv[]) {
     std::cout << "KVT Memory Database Stress Test" << std::endl;
     std::cout << "================================" << std::endl;
+    
+    // Configure checkpoint parameters for stress testing
+    if (ENABLE_CRASH_SIMULATION) {
+        kvt_set_persist_param(true, 5, 500, 2);  // persist=true, checkpoint_period=5, log_size=500, keep_history=2
+        std::cout << "Using small checkpoint parameters for crash testing" << std::endl;
+    }
     
     // Initialize the KVT system
     KVTError init_result = kvt_initialize();
