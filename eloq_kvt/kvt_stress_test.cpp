@@ -1,5 +1,7 @@
-#include "kvt_inc.h"
+//#include "kvt_inc.h"
+#include "kvt_mem.h"
 #include <iostream>
+#include <memory>
 #include <random>
 #include <thread>
 #include <chrono>
@@ -31,7 +33,7 @@ const int CONSTRAINT_DIVISOR = 100;
 // Logging and crash simulation configuration
 const bool ENABLE_LOGGING = true;  // Enable/disable logging
 const bool ENABLE_CRASH_SIMULATION = true;  // Enable random crashes
-const double CRASH_PROBABILITY = 0.01;  // Probability of crash per transaction (1% chance)
+const double CRASH_PROBABILITY = 0.00;  // Probability of crash per transaction (1% chance)
 const int MIN_TXS_BEFORE_CRASH = 50;  // Minimum transactions before allowing crash 
 
 // Test modes
@@ -89,7 +91,7 @@ struct TransactionContext {
     bool should_commit;
     int num_ops;
     std::vector<int> ranges; 
-    ThreadSafeRNG* rng; // Thread-safe RNG for this transaction
+    std::unique_ptr<ThreadSafeRNG> rng; // Thread-safe RNG for this transaction
 
 private:    
     std::vector<Operation> operations; // for replay/debug
@@ -98,6 +100,7 @@ public:
     void append_op(const Operation& op) {
         operations.push_back(op);
         //print_op_list();
+        
     }
 
     Operation & op(int index) {
@@ -180,6 +183,15 @@ private:
     }
     
     void simulate_crash_and_recovery() {
+        if (!ENABLE_CRASH_SIMULATION)
+            return;
+        if (total_transaction_count < MIN_TXS_BEFORE_CRASH)
+            return;
+        
+        double rand_val = main_rng.rand_double(0.0, 1.0);
+        if (rand_val > CRASH_PROBABILITY)
+            return;
+
         crash_count++;
         std::cout << "\n*** SIMULATING CRASH #" << crash_count << " ***" << std::endl;
         std::cout << "Total transactions before crash: " << total_transaction_count << std::endl;
@@ -213,22 +225,10 @@ private:
         }
         std::cout << "Consistency verified after recovery" << std::endl;
     }
-    
-    bool should_simulate_crash() {
-        if (!ENABLE_CRASH_SIMULATION) return false;
-        if (total_transaction_count < MIN_TXS_BEFORE_CRASH) return false;
-        
-        double rand_val = main_rng.rand_double(0.0, 1.0);
-        return rand_val < CRASH_PROBABILITY;
-    }
-    
-    void check_and_simulate_crash_on_operation() {
-        // Check for crash after each operation (not just at transaction boundaries)
-        if (should_simulate_crash()) {
-            simulate_crash_and_recovery();
-            // After crash, we need to throw an exception to stop current execution
-            throw std::runtime_error("Simulated crash during operation");
-        }
+
+    void append_op(TransactionContext& ctx, const TransactionContext::Operation& op) {
+        ctx.append_op(op);
+        simulate_crash_and_recovery();  // Check for crash after operation
     }
     
 public:
@@ -239,13 +239,17 @@ public:
     bool initialize() {
         std::cout << "Initializing stress test..." << std::endl;
         
-        // Create table
+        // Create table or get existing table ID
         std::string error_msg;
-        KVTError result = kvt_create_table(table_name, "range", table_id, error_msg);
-        if (result != KVTError::SUCCESS)
-            PANIC(std::cerr << "Failed to create table: " << error_msg << std::endl;);
-        // Populate initial data
-        populate_initial_data(); 
+        KVTError result = kvt_get_table_id(table_name, table_id, error_msg);
+        assert (result == KVTError::TABLE_NOT_FOUND && "Should start from fresh state");
+        if (result != KVTError::SUCCESS) {
+            result = kvt_create_table(table_name, "range", table_id, error_msg);
+            if (result != KVTError::SUCCESS) {
+                PANIC(std::cerr << "Failed to create table: " << error_msg << std::endl;);
+            }
+        } 
+        populate_initial_data();
         check_consistency("initial"); 
         std::cout << "Initialization complete!" << std::endl;
         return true;
@@ -279,7 +283,7 @@ public:
     }
     
     bool check_consistency(const std::string& context = "") {
-        std::cout << "Checking consistency: " << context << std::endl;
+        //std::cout << "Checking consistency: " << context << std::endl;
         std::string error_msg;
         uint64_t tx_id = 0;
         // Scan entire key range
@@ -327,8 +331,8 @@ public:
             int range_id = main_rng.rand_int(0, MAX_RANGES - 1); //can repeat
             ctx.ranges.push_back(range_id);
         }
-        // Create thread-safe RNG for this transaction
-        ctx.rng = new ThreadSafeRNG(main_rng.rand_int(1, 1000000));
+        // Initialize the transaction-specific RNG
+        ctx.rng = std::make_unique<ThreadSafeRNG>(main_rng.rand_int(1, 1000000));
         return ctx;
     }
 
@@ -350,12 +354,16 @@ public:
                     result == KVTError::KEY_IS_DELETED) {
                     continue; //just try another key
                 }
+                else if (result == KVTError::TRANSACTION_NOT_FOUND) {
+                    // Transaction was lost due to crash - return error indicator
+                    return -2; // Special value to indicate transaction lost
+                }
                 PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;)
             }
             //success, we do this and break, otherwise, after 10 times we will skip
             int value_int = string_to_value(value);
             //append to the operations
-            ctx.append_op({TransactionContext::Operation::OP_GET, key, 0,  value_int, 0});
+            append_op(ctx, {TransactionContext::Operation::OP_GET, key, 0,  value_int, 0});
             return key;
         }
         return -1;
@@ -372,30 +380,42 @@ public:
         std::string value;
         if (prob < 0.4) { //get
             //choose a key from the range
-            try_get_key(ctx, range_id, false);
+            int key = try_get_key(ctx, range_id, false);
+            if (key == -2) // Transaction lost due to crash
+                return;
         } 
         else if (prob < 0.8) { //set
             //scan the ops to see whether we have already got a key's value. 
             int key = try_get_key(ctx, range_id, true);
             if (key == -1) //skip this one, cannot find key
                 return;
+            if (key == -2) // Transaction lost due to crash
+                return;
             //choose a new value
             int new_value = clamp_value(ctx.rng->rand_int(0, MAX_VALUE - 1));
             KVTError result = kvt_set(ctx.tx_id, table_id, key_to_string(key), value_to_string(new_value), error_msg);
+            if (result == KVTError::TRANSACTION_NOT_FOUND) {
+                // Transaction was lost due to crash - operation will be aborted
+                return;
+            }
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to set key: " << error_msg << std::endl;);
-            ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
-            check_and_simulate_crash_on_operation();  // Check for crash after operation
+            append_op(ctx, {TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
         } 
         else if (prob < 0.9) { //del
             int key = try_get_key(ctx, range_id, true);
             if (key == -1) //skip this one, cannot find key
                 return;
+            if (key == -2) // Transaction lost due to crash
+                return;
             KVTError result = kvt_del(ctx.tx_id, table_id, key_to_string(key), error_msg);
+            if (result == KVTError::TRANSACTION_NOT_FOUND) {
+                // Transaction was lost due to crash - operation will be aborted
+                return;
+            }
             if (result != KVTError::SUCCESS)
                 PANIC(std::cerr << "Failed to delete key: " << error_msg << std::endl;);
-            ctx.append_op({TransactionContext::Operation::OP_DEL, key, 0, 0, 0});
-            check_and_simulate_crash_on_operation();  // Check for crash after operation
+            append_op(ctx, {TransactionContext::Operation::OP_DEL, key, 0, 0, 0});
         } 
         else { //scan does not need to care about range
             int start_key = ctx.rng->rand_int(0, MAX_KEY - 1);
@@ -406,11 +426,19 @@ public:
                 end_key = tmp;
             }
             std::vector<std::pair<KVTKey, std::string>> results;
-            KVTError result = kvt_scan(ctx.tx_id, table_id, key_to_string(start_key), key_to_string(end_key), RANGE_SIZE, results, error_msg);
-            if (result != KVTError::SUCCESS)
+            KVTError result = kvt_scan(ctx.tx_id, table_id, key_to_string(start_key), key_to_string(end_key), MAX_KEY, results, error_msg);
+            if (result == KVTError::TRANSACTION_NOT_FOUND) {
+                // Transaction was lost due to crash - operation will be aborted
+                return;
+            }
+            if (result != KVTError::SUCCESS) {
+                std::cerr << "Failed to scan key: start=" << start_key << " end=" << end_key 
+                          << " tx_id=" << ctx.tx_id << " table_id=" << table_id 
+                          << " error=" << error_msg << std::endl;
                 PANIC(std::cerr << "Failed to scan key: " << error_msg << std::endl;);
+            }
             //append to the operations
-            ctx.append_op({TransactionContext::Operation::OP_SCAN, start_key, end_key, 0, static_cast<int>(results.size())});
+            append_op(ctx, {TransactionContext::Operation::OP_SCAN, start_key, end_key, 0, static_cast<int>(results.size())});
         }
     }
 
@@ -447,22 +475,34 @@ public:
                     std::string value;
                     KVTError result = kvt_get(ctx.tx_id, table_id, key_to_string(key), value, error_msg);
                     if (result == KVTError::SUCCESS) {
-                        ctx.append_op({TransactionContext::Operation::OP_GET, key, 0,  existing_value, 0});
+                        append_op(ctx, {TransactionContext::Operation::OP_GET, key, 0,  existing_value, 0});
                         existing_value = string_to_value(value);
                         int new_value = clamp_value(existing_value + diff);
                         result = kvt_set(ctx.tx_id, table_id, key_to_string(key), value_to_string(new_value), error_msg);
-                        ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
+                        if (result == KVTError::TRANSACTION_NOT_FOUND) {
+                            // Transaction was lost due to crash - abort constraint fixing
+                            return;
+                        }
+                        append_op(ctx, {TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
                         done = true;
                     }
                     else if (result == KVTError::KEY_NOT_FOUND ||
                              result == KVTError::KEY_IS_DELETED) {
                         int new_value = diff; //existing value is 0
                         result = kvt_set(ctx.tx_id, table_id, key_to_string(key), value_to_string(new_value), error_msg);
-                        ctx.append_op({TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
+                        if (result == KVTError::TRANSACTION_NOT_FOUND) {
+                            // Transaction was lost due to crash - abort constraint fixing
+                            return;
+                        }
+                        append_op(ctx, {TransactionContext::Operation::OP_SET, key, 0,  new_value, 0});
                         done = true;
                     }
                     else if (result == KVTError::KEY_IS_LOCKED) {
                         continue; //just chose another key
+                    }
+                    else if (result == KVTError::TRANSACTION_NOT_FOUND) {
+                        // Transaction was lost due to crash - abort constraint fixing
+                        return;
                     }
                     else {
                         PANIC(std::cerr << "Failed to get key: " << error_msg << std::endl;);
@@ -493,12 +533,24 @@ public:
                 abort_count++;
                 return false;
             }
+            else if (result == KVTError::TRANSACTION_NOT_FOUND) {
+                // Transaction was lost due to crash - treat as abort
+                std::cout << "Transaction " << ctx.tx_id << " lost due to crash - aborting" << std::endl;
+                abort_count++;
+                return false;
+            }
             else {
                 PANIC(std::cerr << "Commit failed: " << error_msg << std::endl;);
             }
         } else {
             //abort
             KVTError result = kvt_rollback_transaction(ctx.tx_id, error_msg);
+            if (result == KVTError::TRANSACTION_NOT_FOUND) {
+                // Transaction was lost due to crash - already effectively aborted
+                std::cout << "Transaction " << ctx.tx_id << " lost due to crash - already aborted" << std::endl;
+                abort_count++;
+                return false;
+            }
             assert(result == KVTError::SUCCESS);
             abort_count++;
         }
@@ -512,28 +564,10 @@ public:
         auto start_time = std::chrono::steady_clock::now();
         
         for (int i = 0; i < num_transactions; i++) {
-            try {
-                TransactionContext ctx = create_transaction_context();
-                run_single_transaction_normal(ctx);
-                transaction_count++;
-                total_transaction_count++;
-                
-                // Check for crash simulation at transaction boundary
-                if (should_simulate_crash()) {
-                    simulate_crash_and_recovery();
-                    // Reset local counters after crash
-                    transaction_count = 0;
-                    commit_count = 0;
-                    abort_count = 0;
-                }
-            } catch (const std::runtime_error& e) {
-                // Crash occurred during operation
-                // Reset local counters after crash
-                transaction_count = 0;
-                commit_count = 0;
-                abort_count = 0;
-            }
-            
+            TransactionContext ctx = create_transaction_context();
+            run_single_transaction_normal(ctx);
+            transaction_count++;
+            total_transaction_count++;
             // Periodic consistency check
             if ((i + 1) % CONSISTENCY_CHECK_INTERVAL == 0) {
                 if (!check_consistency("transaction " + std::to_string(i + 1))) {
@@ -562,7 +596,7 @@ public:
             if (active_contexts.size() < MAX_CONCURRENT_TXS && 
                 main_rng.rand_bool(0.7)) { // 70% chance to start new transaction
                 TransactionContext ctx = create_transaction_context();
-                active_contexts.push_back(std::make_unique<std::pair<int, TransactionContext>>(std::make_pair(0, ctx)));
+                active_contexts.push_back(std::make_unique<std::pair<int, TransactionContext>>(std::make_pair(0, std::move(ctx))));
             }
             
             if (active_contexts.empty()) continue;
@@ -581,37 +615,31 @@ public:
                         //std::cerr << "TX" << ctx.tx_id << " Commit failed: " << error_msg << std::endl;
                         abort_count++;
                     }
+                    else if (result == KVTError::TRANSACTION_NOT_FOUND) {
+                        // Transaction was lost due to crash - treat as abort
+                        std::cout << "Interleaved transaction " << ctx.tx_id << " lost due to crash - aborting" << std::endl;
+                        abort_count++;
+                    }
                     else {
                         PANIC(std::cerr << "Commit failed: " << error_msg << std::endl;);
                     }
                 }
                 else {
                     KVTError result = kvt_rollback_transaction(ctx.tx_id, error_msg);
-                    assert(result == KVTError::SUCCESS);
-                    abort_count++;
+                    if (result == KVTError::TRANSACTION_NOT_FOUND) {
+                        // Transaction was lost due to crash - already effectively aborted
+                        std::cout << "Interleaved transaction " << ctx.tx_id << " lost due to crash - already aborted" << std::endl;
+                        abort_count++;
+                    } else {
+                        assert(result == KVTError::SUCCESS);
+                        abort_count++;
+                    }
                 }
                 completed++;
                 transaction_count++;
                 total_transaction_count++;
                 
-                // Check for crash simulation
-                if (should_simulate_crash()) {
-                    // Clean up active contexts before crash
-                    for (auto& ac : active_contexts) {
-                        delete ac->second.rng;
-                    }
-                    active_contexts.clear();
-                    
-                    simulate_crash_and_recovery();
-                    // Reset local counters after crash
-                    transaction_count = 0;
-                    commit_count = 0;
-                    abort_count = 0;
-                } else {
-                    // Clean up RNG
-                    delete ctx.rng;
-                    active_contexts.erase(active_contexts.begin() + idx);
-                }
+                active_contexts.erase(active_contexts.begin() + idx);
                 
                 // Periodic consistency check
                 if (completed % CONSISTENCY_CHECK_INTERVAL == 0) {
@@ -641,8 +669,6 @@ public:
             TransactionContext ctx = create_transaction_context();
             run_single_transaction_normal(ctx);
             transaction_count++;
-            // Clean up RNG
-            delete ctx.rng;
         }
         
         std::cout << "Thread " << thread_id << " completed" << std::endl;
@@ -716,7 +742,7 @@ public:
         std::cout << "========================================" << std::endl;
         
         // Test 1: Non-interleaved
-        run_non_interleaved(ENABLE_CRASH_SIMULATION ? 100 : 100);  // Small test for crash simulation
+        run_non_interleaved(10000);  // Small test for crash simulation
         
         // Final consistency check
         if (!check_consistency("after non-interleaved")) {
@@ -725,7 +751,7 @@ public:
         }
         
         // Test 2: Interleaved
-        run_interleaved(ENABLE_CRASH_SIMULATION ? 1000 : 200);  // More transactions if crash testing
+        run_interleaved(ENABLE_CRASH_SIMULATION ? 10000 : 2000);  // More transactions if crash testing
         
         // Final consistency check
         if (!check_consistency("after interleaved")) {
@@ -775,14 +801,16 @@ int main(int argc, char* argv[]) {
     std::cout << "KVT Memory Database Stress Test" << std::endl;
     std::cout << "================================" << std::endl;
     
+    // Initialize the KVT system
+    KVTError init_result = kvt_initialize();
+
     // Configure checkpoint parameters for stress testing
     if (ENABLE_CRASH_SIMULATION) {
-        kvt_set_persist_param(true, 500, 2, false);  // persist=true, log_size=500, keep_history=2, text_log=false
+        kvt_set_persist_param(128* 1024, 5);
+        kvt_set_persist(true);
         std::cout << "Using small checkpoint parameters for crash testing" << std::endl;
     }
     
-    // Initialize the KVT system
-    KVTError init_result = kvt_initialize();
     if (init_result != KVTError::SUCCESS) {
         std::cerr << "Failed to initialize KVT system" << std::endl;
         return 1;

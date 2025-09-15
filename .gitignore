@@ -78,3 +78,4 @@ doc_and_examples/
 eloq_kvt/*_test
 eloq_kvt/kvt_sample
 eloq_kvt/kvt_stress_test
+eloq_kvt/kvt_data.*
