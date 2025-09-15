@@ -1148,6 +1148,7 @@ KVTError KVTMemManagerOCC::commit_transaction(uint64_t tx_id, std::string& error
         }
     }
     //now all readset versions are valid, so we can install the new values
+    uint64_t new_version = next_tx_id++; //use this as the commit timestamp
     for (const auto& delete_item : tx->delete_set) {
         auto [table_id_parsed, key] = parse_table_key(delete_item);
         Table* table = get_table_by_id(table_id_parsed);
@@ -1160,10 +1161,7 @@ KVTError KVTMemManagerOCC::commit_transaction(uint64_t tx_id, std::string& error
         auto [table_id_parsed, key] = parse_table_key(write_pair.first);
         Table* table = get_table_by_id(table_id_parsed);
         assert(table);
-
-        //must use an ever increasing value, cannot use metadata + 1, as a deleted 
-        //and then inserted one will get a smaller version, even though it is older
-        uint64_t new_version = tx_id; 
+        //use commit timestamp as the versiond
         table->data[key] = Entry(write_pair.second.data, static_cast<int32_t>(new_version));
         
     }
@@ -1188,9 +1186,6 @@ KVTError KVTMemManagerOCC::get(uint64_t tx_id, uint64_t table_id, const KVTKey& 
         std::string& value, std::string& error_msg) 
 {
     std::lock_guard<std::mutex> lock(global_mutex);
-    if (key == KVTKey("01277")) {
-        std::cout << "Get Key " << key << " TxID " << tx_id << std::endl; 
-    }
     //one shot transaction is only allowed for read only transaction.
     if (tx_id == 0) {
         Table* table = get_table_by_id(table_id);
@@ -1242,10 +1237,7 @@ KVTError KVTMemManagerOCC::get(uint64_t tx_id, uint64_t table_id, const KVTKey& 
            const std::string& value, std::string& error_msg) 
     {
         std::lock_guard<std::mutex> lock(global_mutex);
-        if (key == KVTKey("01277")) {
-            std::cout << "Set Key " << key << " TxID " << tx_id << "  Value: " << value << std::endl; 
-        }
-            if (tx_id == 0) {
+        if (tx_id == 0) {
             Table* table = get_table_by_id(table_id);
             if (!table) {
                 error_msg = "Table with ID " + std::to_string(table_id) + " not found";
@@ -1362,19 +1354,7 @@ KVTError KVTMemManagerOCC::scan(uint64_t tx_id, uint64_t table_id, const KVTKey&
             tx->read_set[table_key] = itr->second;
             results_table[itr->first] = itr->second.data;
         } else {
-            if (tx->read_set[table_key].data != itr->second.data) {
-                //if my value is not the same as the table, table value is newer, so my version must be older
-                //actually we should abort here, but we just assert for now. since we are not supposed to
-                //read from table in real implementations. 
-                if (tx->read_set[table_key].metadata >= itr->second.metadata) {
-                    std::cout << "Key: " << itr->first  << std::endl;
-                    std::cout << "ReadSet: " << tx->read_set[table_key].data << " : " << tx->read_set[table_key].metadata << std::endl;
-                    std::cout << "Data In Table: " << itr->second.data << " : " << itr->second.metadata << std::endl;
-                    std::cout << "Read from table is newer than write set, this should not happen" << std::endl;
-                }
-                assert (tx->read_set[table_key].metadata < itr->second.metadata);
-            }
-            results_table[itr->first] = tx->read_set[table_key].data; //should be the same, if not, then we will abort anyway.
+            results_table[itr->first] = tx->read_set[table_key].data; 
         }
         if (results_table.size() >= num_item_limit) {
             break;
