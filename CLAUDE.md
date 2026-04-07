@@ -1,0 +1,1 @@
+When building EloqKV, just do `make -j 6` under the build/ directory. 
