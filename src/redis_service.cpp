@@ -103,6 +103,7 @@
 #include "redis_connection_context.h"
 #include "redis_handler.h"
 #include "redis_metrics.h"
+#include "tb_handler.h"
 #include "redis_stats.h"
 #include "redis_string_match.h"
 // #include "store_handler/rocksdb_config.h"
@@ -3261,6 +3262,15 @@ void RedisServiceImpl::AddHandlers()
     auto &slowlog_hd =
         hd_vec_.emplace_back(std::make_unique<SlowLogCommandHandler>(this));
     AddCommandHandler("slowlog", slowlog_hd.get());
+
+    // TigerBeetle financial commands
+    auto &tb_hd =
+        hd_vec_.emplace_back(std::make_unique<TbCommandHandler>(this));
+    AddCommandHandler("tb", tb_hd.get());
+
+    auto &tb_bin_hd =
+        hd_vec_.emplace_back(std::make_unique<TbBinCommandHandler>(this));
+    AddCommandHandler("tb_bin", tb_bin_hd.get());
 }
 
 TransactionExecution *RedisServiceImpl::NewTxm(IsolationLevel iso_level,
@@ -4275,6 +4285,15 @@ void RedisServiceImpl::GenericCommand(RedisConnectionContext *ctx,
     case RedisCommandType::DBSIZE:
     {
         auto [success, cmd] = ParseDBSizeCommand(cmd_arg_list, output);
+        if (success)
+        {
+            ExecuteCommand(ctx, &cmd, output);
+        }
+        break;
+    }
+    case RedisCommandType::TIME:
+    {
+        auto [success, cmd] = ParseTimeCommand(cmd_arg_list, output);
         if (success)
         {
             ExecuteCommand(ctx, &cmd, output);

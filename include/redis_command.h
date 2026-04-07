@@ -300,6 +300,10 @@ enum struct RedisCommandType
     UNSUBSCRIBE,
     PSUBSCRIBE,
     PUNSUBSCRIBE,
+
+    // TigerBeetle financial commands
+    TB,
+    TB_BIN,
 };
 
 enum RedisResultType

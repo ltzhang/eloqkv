@@ -488,6 +488,8 @@ SET(RESELOQ_RESOURCES
     src/redis_string_match.cpp
     src/redis_connection_context.cpp
     src/redis_stats.cpp
+    src/tb_types.cpp
+    src/tb_handler.cpp
 )
 
 SET(INI_SOURCES src/ini.c src/INIReader.cpp)
