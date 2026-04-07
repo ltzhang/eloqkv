@@ -1,6 +1,6 @@
-# Open Issues In TigerBeetle Integration
+# Remaining Issues In TigerBeetle Integration
 
-This document lists the currently open issues in EloqKV's TigerBeetle-related implementation and in the companion `lua_beetle` reference scripts.
+This document tracks the remaining gaps between EloqKV's TigerBeetle integration and the local TigerBeetle reference in `external/tigerbeetle/`.
 
 It is a fresh audit of the current codebase state.
 
@@ -13,195 +13,219 @@ Audited components:
 - [tb_types.cpp](/home/lintaoz/work/eloqkv/src/tb_types.cpp)
 - [tb_handler.cpp](/home/lintaoz/work/eloqkv/src/tb_handler.cpp)
 - `external/lua_beetle/scripts/*.lua`
-- `external/lua_beetle/tests/*`
 - local TigerBeetle reference in `external/tigerbeetle/`
 
 Reference sources used:
 
 - `external/tigerbeetle/src/tigerbeetle.zig`
 - `external/tigerbeetle/src/state_machine.zig`
-- `external/tigerbeetle/src/clients/c/tb_client.h`
-- `external/tigerbeetle/src/clients/dotnet/TigerBeetle/Bindings.cs`
 
 ## Current Status
 
-Goal-by-goal, the current state is:
+1. Native `TB` / `TB_BIN` command surface:
 
-1. Native `TB` / `TB_BIN` commands in EloqKV:
+- Implemented.
+- The command handlers, binary layouts, storage keys, and query/update paths exist.
 
-- Partially implemented.
-- The command surface exists, but the implementation is still not current-TigerBeetle-correct.
+2. Native TigerBeetle semantics:
 
-2. TigerBeetle native wire protocol compatibility:
+- Incomplete.
+- The implementation is usable, but it is not yet semantically equivalent to the local TigerBeetle reference.
 
-- Not implemented.
+3. `lua_beetle` compatibility/reference path:
 
-3. `lua_beetle` correctness audit and fixes:
-
-- Partially complete.
-- The Lua implementation is improved, but still not equivalent to current TigerBeetle semantics.
+- Partially aligned.
+- The storage layout matches EloqKV, but the Lua semantics are still incomplete.
 
 ## Open Issues
 
-### EloqKV
+### EloqKV Native C++ Path
 
-1. Imported-event semantics are not implemented.
+1. Imported-event semantics are incomplete.
 
 Files:
 
 - [tb_handler.cpp](/home/lintaoz/work/eloqkv/src/tb_handler.cpp)
 
+Issue type:
+
+- Incomplete.
+
 Problem:
 
-- Imported account semantics are rejected up front instead of being implemented.
-- Imported transfer semantics are rejected up front instead of being implemented.
-- The implementation still lacks the current TigerBeetle imported-event rules, including:
+- Imported accounts are rejected up front instead of being implemented.
+- Imported transfers are rejected up front instead of being implemented.
+- The implementation therefore lacks the current TigerBeetle imported-event rules, including:
   - imported/non-imported batch expectations
-  - imported timestamp ordering checks
-  - imported timestamp regression checks
+  - imported timestamp ordering and regression checks
   - imported transfer postdating checks against account timestamps
   - imported timeout restrictions
 
+Evidence:
+
+- [`tb_handler.cpp`](/home/lintaoz/work/eloqkv/src/tb_handler.cpp#L122)
+- [`tb_handler.cpp`](/home/lintaoz/work/eloqkv/src/tb_handler.cpp#L129)
+- [`tb_handler.cpp`](/home/lintaoz/work/eloqkv/src/tb_handler.cpp#L599)
+- [`tb_handler.cpp`](/home/lintaoz/work/eloqkv/src/tb_handler.cpp#L742)
+- TigerBeetle imported-event result family in `external/tigerbeetle/src/tigerbeetle.zig`
+
 Impact:
 
-- Imported account and transfer workflows are unsupported.
+- Imported-event workflows are unsupported.
 
-2. Advanced transfer flags are not implemented.
+2. Advanced transfer flags are incomplete.
 
 Files:
 
 - [tb_types.h](/home/lintaoz/work/eloqkv/include/tb_types.h)
 - [tb_handler.cpp](/home/lintaoz/work/eloqkv/src/tb_handler.cpp)
 
+Issue type:
+
+- Incomplete.
+
 Problem:
 
-- The type layer defines:
+- The API surface defines:
   - `balancing_debit`
   - `balancing_credit`
   - `closing_debit`
   - `closing_credit`
-- The execution path rejects these semantics rather than implementing TigerBeetle behavior for them.
+- The execution path rejects those semantics instead of implementing TigerBeetle behavior for them.
+
+Evidence:
+
+- [`tb_types.h`](/home/lintaoz/work/eloqkv/include/tb_types.h#L106)
+- [`tb_handler.cpp`](/home/lintaoz/work/eloqkv/src/tb_handler.cpp#L129)
+- [`tb_handler.cpp`](/home/lintaoz/work/eloqkv/src/tb_handler.cpp#L744)
 
 Impact:
 
-- These flags are visible at the API level but not supported functionally.
+- These flags are visible but not functionally supported.
 
 3. Transfer idempotency is incomplete.
 
 Files:
 
-- [tb_handler.cpp](/home/lintaoz/work/eloqkv/src/tb_handler.cpp)
 - [tb_types.h](/home/lintaoz/work/eloqkv/include/tb_types.h)
+- [tb_handler.cpp](/home/lintaoz/work/eloqkv/src/tb_handler.cpp)
+
+Issue type:
+
+- Incomplete, with semantic mismatch against TigerBeetle.
 
 Problem:
 
-- Existing transfers still collapse to `EXISTS` rather than the full `exists_with_different_*` result family.
+- Existing-transfer checks now distinguish several field mismatches, but they still do not cover the full TigerBeetle result space.
 - `id_already_failed` is not modeled.
-- Some current transfer result codes are still missing entirely, including:
-  - `exists_with_different_ledger`
-  - closed-account-specific statuses
-  - imported-event status family
-  - `overflows_debits`
-  - `overflows_credits`
+- The imported-event idempotency result family is not modeled.
+- `overflows_debits` and `overflows_credits` are missing even though TigerBeetle defines them.
+
+Evidence:
+
+- Native comparison path: [`tb_handler.cpp`](/home/lintaoz/work/eloqkv/src/tb_handler.cpp#L321)
+- Native result enum: [`tb_types.h`](/home/lintaoz/work/eloqkv/include/tb_types.h#L162)
+- TigerBeetle result enum: `external/tigerbeetle/src/tigerbeetle.zig:240`
+- TigerBeetle `id_already_failed`: `external/tigerbeetle/src/tigerbeetle.zig:253`
+- TigerBeetle `overflows_debits` / `overflows_credits`: `external/tigerbeetle/src/tigerbeetle.zig:308`
 
 Impact:
 
-- Duplicate handling and retry behavior are not TigerBeetle-compatible.
+- Retry and duplicate-submission behavior are still not TigerBeetle-complete.
 
-4. Closed-account transfer behavior is not implemented.
+4. Closed-account transfer behavior is still only partially correct.
 
 Files:
 
 - [tb_handler.cpp](/home/lintaoz/work/eloqkv/src/tb_handler.cpp)
 
+Issue type:
+
+- Semantic mismatch.
+
 Problem:
 
-- Closed accounts are represented in flags.
-- Transfer execution does not enforce TigerBeetle's closed-account rules.
+- Closed-account-specific statuses are present.
+- The current logic allows `void_pending` on a closed account, which matches TigerBeetle.
+- The remaining closed-account semantics tied to closing transfers are still not implemented because closing transfer flags themselves are not implemented.
+
+Evidence:
+
+- Native closed-account gate: [`tb_handler.cpp`](/home/lintaoz/work/eloqkv/src/tb_handler.cpp#L376)
+- TigerBeetle closed-account rule: `external/tigerbeetle/src/state_machine.zig:4068`
+- TigerBeetle closing-transfer status: `external/tigerbeetle/src/tigerbeetle.zig:269`
 
 Impact:
 
-- Closed-account movement rules are incorrect.
+- Basic closed-account enforcement exists, but full TigerBeetle closing-account behavior is still incomplete.
 
-5. Account creation is still not fully current-TigerBeetle complete.
+5. Post/void pending semantics are only partially current-TigerBeetle correct.
 
 Files:
 
 - [tb_handler.cpp](/home/lintaoz/work/eloqkv/src/tb_handler.cpp)
 
+Issue type:
+
+- Semantic mismatch.
+
 Problem:
 
-- Imported account semantics are rejected rather than implemented.
-- Current TigerBeetle imported-account behavior is therefore still missing.
+- The native path supports partial `post_pending` by using the explicit amount when provided.
+- It does not implement TigerBeetle's `amount = maxInt(u128)` sentinel behavior for posting the full pending amount.
+- It does not implement `pending_transfer_expired`.
+- It currently requires exact account IDs, ledger, and code on post/void requests, while TigerBeetle allows those fields to be omitted and resolved from the pending transfer.
+
+Evidence:
+
+- Native post/void path: [`tb_handler.cpp`](/home/lintaoz/work/eloqkv/src/tb_handler.cpp#L389)
+- TigerBeetle post/void rules: `external/tigerbeetle/src/state_machine.zig:3969`
+- TigerBeetle `pending_transfer_expired`: `external/tigerbeetle/src/tigerbeetle.zig:294`
 
 Impact:
 
-- Account creation is only complete for the non-imported subset.
+- Two-phase transfer behavior is close, but not yet TigerBeetle-equivalent.
 
 ### `lua_beetle`
 
-6. Transfer semantics are still incomplete and not fully current-TigerBeetle correct.
+6. Transfer semantics in Lua are incomplete.
 
 Files:
 
 - [create_transfer.lua](/home/lintaoz/work/eloqkv/external/lua_beetle/scripts/create_transfer.lua)
 - [create_linked_transfers.lua](/home/lintaoz/work/eloqkv/external/lua_beetle/scripts/create_linked_transfers.lua)
 
-Problem:
+Issue type:
 
-- Imported-event semantics are still not implemented and are rejected instead.
-- Advanced transfer flags are still not implemented and are rejected instead.
-- Full current idempotency result distinctions are not implemented.
-- Some post/void amount handling still does not match current TigerBeetle behavior exactly.
-
-Impact:
-
-- The Lua transfer implementation remains only partially correct.
-
-7. The single-transfer and linked-transfer Lua scripts are not fully aligned.
-
-Files:
-
-- [create_transfer.lua](/home/lintaoz/work/eloqkv/external/lua_beetle/scripts/create_transfer.lua)
-- [create_linked_transfers.lua](/home/lintaoz/work/eloqkv/external/lua_beetle/scripts/create_linked_transfers.lua)
+- Incomplete, with semantic mismatch.
 
 Problem:
 
-- The linked-transfer script still lags the single-transfer script in validation completeness.
-- The two paths are not guaranteed to return the same result for the same logical error case.
+- Imported-event semantics are still rejected instead of implemented.
+- Advanced transfer flags are still rejected instead of implemented.
+- Full idempotency result distinctions are not implemented.
+- Current TigerBeetle post/void sentinel and expiry semantics are not implemented.
 
 Impact:
 
-- Batch and single-operation behavior can diverge.
+- The Lua transfer path is still not a full TigerBeetle-equivalent reference.
 
-8. Account creation is improved but still not fully current-TigerBeetle complete.
+7. Lua account creation semantics are incomplete.
 
 Files:
 
 - [create_account.lua](/home/lintaoz/work/eloqkv/external/lua_beetle/scripts/create_account.lua)
 - [create_linked_accounts.lua](/home/lintaoz/work/eloqkv/external/lua_beetle/scripts/create_linked_accounts.lua)
 
-Problem:
+Issue type:
 
-- Imported account semantics are still not implemented and are rejected instead.
-- Full current account status coverage is not implemented.
-
-Impact:
-
-- The Lua account path is still only partially aligned with current TigerBeetle behavior.
-
-9. Lua history/index storage is incompatible with EloqKV history storage.
+- Incomplete.
 
 Problem:
 
-- `lua_beetle` uses `APPEND`-based string indexes for:
-  - transfer history
-  - balance history
-- EloqKV uses:
-  - sorted sets for transfer history
-  - lists for balance history
+- Imported-account semantics are still rejected instead of implemented.
+- Full current TigerBeetle account result coverage is not implemented.
 
 Impact:
 
-- The two implementations cannot share history/query storage structures.
-
+- The Lua account path is still only a partial reference implementation.

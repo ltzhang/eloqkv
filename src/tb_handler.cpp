@@ -319,7 +319,35 @@ static TbTransferStatus tb_do_create_transfer(RedisServiceImpl *redis_impl,
         return TbTransferStatus::EXISTS;
     }
     if (!txfr_get.is_nil())
+    {
+        TbTransfer existing{};
+        if (!tb_decode_transfer(txfr_get.str_val, existing))
+            return TbTransferStatus::EXISTS;
+        // Field comparison order matches TigerBeetle state_machine.zig
+        if (existing.flags != txfr.flags)
+            return TbTransferStatus::EXISTS_WITH_DIFFERENT_FLAGS;
+        if (existing.pending_id != txfr.pending_id)
+            return TbTransferStatus::EXISTS_WITH_DIFFERENT_PENDING_ID;
+        if (existing.timeout != txfr.timeout)
+            return TbTransferStatus::EXISTS_WITH_DIFFERENT_TIMEOUT;
+        if (existing.debit_account_id != txfr.debit_account_id)
+            return TbTransferStatus::EXISTS_WITH_DIFFERENT_DEBIT_ACCOUNT_ID;
+        if (existing.credit_account_id != txfr.credit_account_id)
+            return TbTransferStatus::EXISTS_WITH_DIFFERENT_CREDIT_ACCOUNT_ID;
+        if (existing.amount != txfr.amount)
+            return TbTransferStatus::EXISTS_WITH_DIFFERENT_AMOUNT;
+        if (existing.user_data_128 != txfr.user_data_128)
+            return TbTransferStatus::EXISTS_WITH_DIFFERENT_USER_DATA_128;
+        if (existing.user_data_64 != txfr.user_data_64)
+            return TbTransferStatus::EXISTS_WITH_DIFFERENT_USER_DATA_64;
+        if (existing.user_data_32 != txfr.user_data_32)
+            return TbTransferStatus::EXISTS_WITH_DIFFERENT_USER_DATA_32;
+        if (existing.ledger != txfr.ledger)
+            return TbTransferStatus::EXISTS_WITH_DIFFERENT_LEDGER;
+        if (existing.code != txfr.code)
+            return TbTransferStatus::EXISTS_WITH_DIFFERENT_CODE;
         return TbTransferStatus::EXISTS;
+    }
 
     // --- Load debit account ---
     std::string debit_key = tb_account_key(txfr.debit_account_id);
@@ -344,6 +372,13 @@ static TbTransferStatus tb_do_create_transfer(RedisServiceImpl *redis_impl,
         return TbTransferStatus::ACCOUNTS_MUST_HAVE_THE_SAME_LEDGER;
     if (txfr.ledger != debit_acc.ledger)
         return TbTransferStatus::TRANSFER_MUST_HAVE_THE_SAME_LEDGER_AS_ACCOUNTS;
+
+    // --- Closed-account enforcement ---
+    // void_pending is the only transfer allowed on a closed account
+    if (debit_acc.has_flag(AccountFlags::CLOSED) && !txfr.has_flag(TransferFlags::VOID_PENDING))
+        return TbTransferStatus::DEBIT_ACCOUNT_ALREADY_CLOSED;
+    if (credit_acc.has_flag(AccountFlags::CLOSED) && !txfr.has_flag(TransferFlags::VOID_PENDING))
+        return TbTransferStatus::CREDIT_ACCOUNT_ALREADY_CLOSED;
 
     // --- Assign server timestamp ---
     if (!txfr.has_flag(TransferFlags::IMPORTED))

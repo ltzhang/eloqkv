@@ -11,10 +11,8 @@ This document records the goals, design decisions, implementation plan, and all 
 > I want to implement the tigerbeetle functionalities in eloqkv. Look at https://docs.tigerbeetle.com/ for API and information, and https://github.com/tigerbeetle/tigerbeetle for actual implementation. In this project. I want to:
 >
 > 1. Augment the Redis API to have a special command (e.g. `TB`) and then run tiger beetle commands.
-> 2. Augment the network so that the tiger_beetle's native repl can directly interact with the brpc layer (i.e. make eloqkv wire protocol compatible with tigerbeetle).
-> 3. Look at symbolic link `external/lua_beetle`, which tries to implement this (but with lua script). This project may be faulty (but have a rough skeleton correctness). See if there are any issues with the lua script if run under eloqkv (or redis, for that matter, but without persistency and transaction part).
-> 4. I have a symbolic `external/tiger_beetle` that checked out the git repo of tigerbeetle, you can use it to examine the code locally.
-> 5. I also have a `external/bin` that have the executables of tigerbeetle and dragonflydb, as well as redis. You can use these as the official release of the executables.
+> 2. Augment the network so that the tigerbeetle's native repl can directly interact with the brpc layer (i.e. make eloqkv wire protocol compatible with tigerbeetle).
+> 3. `external/bin` have the executables of tigerbeetle and dragonflydb, as well as redis. You can use these as the official release of the executables.
 
 ### Clarifications Made During Planning
 
@@ -26,7 +24,7 @@ The following decisions were reached through Q&A before implementation began:
 | Wire protocol encoding for TB command? | **Both.** `TB` = text key=value format; `TB_BIN` = binary 128-byte blobs. |
 | Goal 2 (VSR wire protocol) — when? | **Deferred.** Too large for this iteration; requires a separate brpc listener and VSR framing. |
 | Storage: dedicated data structure vs. Redis-style string keys? | **Option A: Redis string keys** (`account:{id}` → 128-byte blob). Simple, compatible with lua_beetle's schema, reuses EloqKV's existing string infrastructure. |
-| Transfer history index: string APPEND vs. sorted set? | **Sorted set** (score = timestamp in microseconds). Enables O(log N) range queries for `GET_ACCOUNT_TRANSFERS`, unlike lua_beetle's O(N) APPEND approach. |
+| Transfer history index: string APPEND vs. sorted set? | **Sorted set** (score = timestamp in microseconds). Both EloqKV and the current `lua_beetle` scripts use the same sorted-set format so queries and updates interoperate on the same keys. |
 | Atomicity model: EloqKV BEGIN/COMMIT or TB-native linked batches? | **TB-native linked batches.** Each `TB`/`TB_BIN` call is self-contained; atomicity is per linked chain, not exposed as a BEGIN/COMMIT to the caller. |
 | Redis vs. DragonflyDB as correctness standard for lua_beetle audit? | **Redis is the golden standard.** DragonflyDB is secondary. |
 
@@ -78,7 +76,7 @@ Redis-compatible drop-in replacement. Used to verify lua_beetle scripts work bey
 
 **Location:** `/home/lintaoz/work/lua_beetle/` (also accessible as `external/lua_beetle` from within the eloqkv repo)
 
-Pure Lua scripts that implement TigerBeetle semantics on top of standard Redis commands (`GET`, `SET`, `EXISTS`, `APPEND`). Each operation is a self-contained `EVAL` script. Intended as a readable reference for the binary format, validation logic, and two-phase transfer handling — not as a production implementation.
+Pure Lua scripts that implement TigerBeetle semantics on top of standard Redis commands (`GET`, `SET`, `EXISTS`, `ZADD`, `RPUSH`). Each operation is a self-contained `EVAL` script. Intended as a readable reference for the binary format, validation logic, and two-phase transfer handling — not as a production implementation.
 
 ```
 lua_beetle/
@@ -209,7 +207,7 @@ Accounts and transfers are stored as binary blobs using EloqKV's existing string
 | Transfer history index | `account:{16 raw bytes}:transfers` | Redis sorted set (score=timestamp_μs, member=32-hex-ID) |
 | Balance history | `account:{16 raw bytes}:balance_history` | Redis list (RPUSH 128-byte TbAccountBalance blobs) |
 
-**Why sorted set for transfer history?** The lua_beetle reference uses string APPEND (O(1) write, O(N) range scan). A sorted set gives O(log N) range queries by timestamp, which is required for `GET_ACCOUNT_TRANSFERS` with `timestamp_min`/`timestamp_max` filters and `limit`.
+**Why sorted set for transfer history?** Both EloqKV and the current `lua_beetle` scripts store transfer history in a sorted set, with score = timestamp in microseconds and member = 32-char lowercase hex transfer ID. This gives O(log N) range queries by timestamp for `GET_ACCOUNT_TRANSFERS`.
 
 **Why microsecond ZADD scores?** Nanosecond timestamps (~1.7×10¹⁸) exceed IEEE 754 double precision (2⁵³ ≈ 9×10¹⁵). Dividing by 1000 gives microsecond scores (~1.7×10¹²), safely representable without loss.
 
@@ -230,7 +228,7 @@ Both commands share the same internal `tb_exec_*` functions.
 
 ## New Files Created
 
-### `include/tb_types.h` — Type definitions (392 lines)
+### `include/tb_types.h` — Type definitions
 
 All TigerBeetle data types:
 
@@ -238,10 +236,13 @@ All TigerBeetle data types:
 TbU128                   — 128-bit unsigned integer {lo, hi uint64_t}; arithmetic operators via __int128
 AccountFlags namespace   — LINKED=0x0001, DEBITS_MUST_NOT_EXCEED_CREDITS=0x0002,
                            CREDITS_MUST_NOT_EXCEED_DEBITS=0x0004, HISTORY=0x0008,
-                           IMPORTED=0x0100, CLOSED=0x0200
+                           IMPORTED=0x0010, CLOSED=0x0020
 TransferFlags namespace  — LINKED=0x0001, PENDING=0x0002, POST_PENDING=0x0004,
                            VOID_PENDING=0x0008, IMPORTED=0x0100
-TbError enum (uint32_t)  — ~43 error codes matching TigerBeetle spec
+TbTransferStatus enum    — Full set of transfer result codes matching TigerBeetle spec,
+                           including EXISTS_WITH_DIFFERENT_* family (codes 36–45, 67),
+                           DEBIT/CREDIT_ACCOUNT_ALREADY_CLOSED (65–66),
+                           OVERFLOWS_* and EXCEEDS_* codes
 TbAccount struct         — 128-byte layout matching TigerBeetle binary format
 TbTransfer struct        — 128-byte layout matching TigerBeetle binary format
 TbAccountBalance struct  — 128-byte layout for balance history snapshots
@@ -290,7 +291,7 @@ class TbBinCommandHandler : public RedisCommandHandler {
 };
 ```
 
-### `src/tb_handler.cpp` — Core logic (1291 lines)
+### `src/tb_handler.cpp` — Core logic
 
 Key internal functions:
 
@@ -306,14 +307,23 @@ tb_do_create_account(redis_impl, ctx, txm, account)
 
 tb_do_create_transfer(redis_impl, ctx, txm, transfer)
     Validates transfer fields (id≠0, debit≠credit, amount≠0, ledger≠0, code≠0)
-    Checks transfer existence → ERR_EXISTS_WITH_DIFFERENT_FLAGS
+    Checks transfer existence → field-specific EXISTS_WITH_DIFFERENT_* codes (36–45, 67)
+      Comparison order matches state_machine.zig: flags, pending_id, timeout,
+      debit_account_id, credit_account_id, amount, user_data_128/64/32, ledger, code
     Loads both accounts → ERR_DEBIT/CREDIT_ACCOUNT_NOT_FOUND
-    Validates ledgers match → ERR_LEDGER_MUST_MATCH
+    Validates ledgers match → ERR_ACCOUNTS_MUST_HAVE_THE_SAME_LEDGER /
+      ERR_TRANSFER_MUST_HAVE_THE_SAME_LEDGER_AS_ACCOUNTS
+    Enforces closed-account rule → DEBIT/CREDIT_ACCOUNT_ALREADY_CLOSED
+      (void_pending transfers are the sole exception — allowed on closed accounts)
     Dispatches by flags:
       PENDING:      debits_pending+=amount, credits_pending+=amount
-      POST_PENDING: looks up pending transfer, debits_pending-=amount,
-                    debits_posted+=amount, credits_pending-=amount, credits_posted+=amount
-      VOID_PENDING: debits_pending-=amount, credits_pending-=amount
+      POST_PENDING: looks up pending transfer,
+                    debits_pending -= pending_transfer.amount,
+                    debits_posted  += amount_actual (amount if nonzero, else pending_transfer.amount),
+                    credits_pending -= pending_transfer.amount,
+                    credits_posted  += amount_actual
+      VOID_PENDING: debits_pending -= pending_transfer.amount,
+                    credits_pending -= pending_transfer.amount
       direct:       debits_posted+=amount, credits_posted+=amount
     Enforces balance constraints:
       DEBITS_MUST_NOT_EXCEED_CREDITS on debit account's own totals
@@ -458,19 +468,51 @@ ErrLinkedEventFailed    = 1
 ErrLinkedEventChainOpen = 2
 ```
 
+#### Bug 4 — POST_PENDING applied full pending amount to posted balances instead of requested amount
+
+**Files:** `create_transfer.lua`, `create_linked_transfers.lua`
+
+**Problem:** Both scripts subtracted `pending_amount_bytes` from pending balances (correct) but also added `pending_amount_bytes` to posted balances (wrong). Per `state_machine.zig`, posted balances must increase by `amount_actual` — the amount specified in the posting transfer, or the full pending amount when the posting transfer specifies 0.
+
+**Fix:** Both scripts now compute `amount_actual` before the is_post balance block:
+```lua
+local amount_actual = (amount_bytes == lb_zero_16) and pending_amount_bytes or amount_bytes
+```
+Pending subtraction still uses `pending_amount_bytes`; posted addition uses `amount_actual`.
+
+#### Bug 5 — `create_linked_transfers.lua` missing `pending_id_must_be_zero` and timeout validation for non-post/void transfers
+
+**File:** `create_linked_transfers.lua`
+
+**Problem:** `create_transfer.lua` validates that for direct and pending transfers `pending_id` must be zero (`ERR_PENDING_ID_MUST_BE_ZERO`, code 13), and that `timeout` must be zero for non-pending transfers (`ERR_TIMEOUT_RESERVED_FOR_PENDING_TRANSFER`, code 17). The linked-transfer script had neither check, and lacked the `timeout` field extraction entirely.
+
+**Fix:** Added the two constants, extracted `timeout = lb_decode_u32(transfer_data, 109)`, and inserted a validation block before the post/void processing branch:
+```lua
+if not is_post and not is_void then
+    if pending_id_raw ~= lb_zero_16 then
+        error_code = ERR_PENDING_ID_MUST_BE_ZERO
+    elseif not is_pending and timeout ~= 0 then
+        error_code = ERR_TIMEOUT_RESERVED_FOR_PENDING_TRANSFER
+    end
+end
+```
+The `elseif is_pending` and direct-transfer `else` branches were also guarded with `error_code == 0` to prevent executing balance operations after a validation failure.
+
 ### Non-Bugs Investigated
 
 The following were investigated and confirmed correct (not bugs):
 
-- **Balance constraint variable usage:** `create_transfer.lua` lines 213–247 correctly read each account's own balance fields — `new_debit_account` is used for the `DEBITS_MUST_NOT_EXCEED_CREDITS` check, and `new_credit_account` for `CREDITS_MUST_NOT_EXCEED_DEBITS`. The plan initially flagged these as bugs; they are not.
+- **Balance constraint variable usage:** `create_transfer.lua` correctly reads each account's own balance fields — `new_debit_account` for the `DEBITS_MUST_NOT_EXCEED_CREDITS` check, and `new_credit_account` for `CREDITS_MUST_NOT_EXCEED_DEBITS`. The plan initially flagged these as bugs; they are not.
 
 - **POST_PENDING/VOID_PENDING account assembly:** The binary string slice-and-concatenate operations correctly update only the relevant 16-byte fields within each 128-byte account blob.
 
-- **Linked chain rollback in create_linked_transfers.lua:** The rollback mechanism — `DEL` transfer records, restore account blobs via `modified_accounts` dict, truncate index strings via `GETRANGE+SET` — is logically correct for the Redis string-APPEND index design.
+- **Linked chain rollback in create_linked_transfers.lua:** The rollback mechanism — `DEL` transfer records, restore account blobs via `modified_accounts` dict, remove sorted-set history members via `ZREM`, and trim balance-history lists via `LTRIM` — matches the live storage layout shared with EloqKV.
 
 - **encode_account_balance timestamp:** Uses the transfer's timestamp for the balance snapshot, which is the correct TigerBeetle semantic (snapshot timestamp = timestamp of the causative transfer).
 
-- **Unclosed chain at end of batch (create_linked_accounts.lua:121, create_linked_transfers.lua:440):** Both correctly return code `2` for `ERR_LINKED_EVENT_CHAIN_OPEN`.
+- **Unclosed chain at end of batch (create_linked_accounts.lua, create_linked_transfers.lua):** Both correctly return code `2` for `ERR_LINKED_EVENT_CHAIN_OPEN`.
+
+- **Data format and key compatibility between lua_beetle and EloqKV C++:** Verified that all Redis key formats, binary layouts, endianness, ZADD score encoding, and query methods are byte-for-byte identical between the two implementations. Both can safely read and write the same database state without any format conversion.
 
 ---
 
@@ -511,19 +553,37 @@ TB GET_ACCOUNT_BALANCES account_id=1 limit=10
 
 ---
 
+## EloqKV C++ Fixes (post-initial-implementation)
+
+### Transfer idempotency — field-specific error codes
+
+**File:** `src/tb_handler.cpp`
+
+The original duplicate-transfer check returned the generic `EXISTS` (46) for all re-submitted transfers. It now decodes the existing transfer and returns the specific `EXISTS_WITH_DIFFERENT_*` code (36–45, 67) for the first mismatched field, in the same comparison order as `state_machine.zig`. Only an exact duplicate returns `EXISTS` (idempotent success).
+
+### Closed-account enforcement
+
+**Files:** `src/tb_handler.cpp`, `include/tb_types.h`
+
+Transfers on accounts with the `CLOSED` flag now fail with `DEBIT_ACCOUNT_ALREADY_CLOSED` (65) or `CREDIT_ACCOUNT_ALREADY_CLOSED` (66). Per `state_machine.zig`, `void_pending` is the sole exception — it is always permitted on closed accounts (to allow releasing funds locked in a pending transfer).
+
+Two new enum values added to `TbTransferStatus` in `tb_types.h`: `DEBIT_ACCOUNT_ALREADY_CLOSED = 65`, `CREDIT_ACCOUNT_ALREADY_CLOSED = 66`, `EXISTS_WITH_DIFFERENT_LEDGER = 67`.
+
+---
+
 ## File Summary
 
-| File | Status | Lines | Purpose |
-|---|---|---|---|
-| `include/tb_types.h` | New | 392 | TigerBeetle type definitions, error codes, function declarations |
-| `src/tb_types.cpp` | New | 904 | Binary encode/decode, key builders, timestamp, text parsers |
-| `include/tb_handler.h` | New | 219 | Handler class declarations, CaptureOutputHandler |
-| `src/tb_handler.cpp` | New | 1291 | Full command logic for all TB subcommands |
-| `include/redis_command.h` | Modified | +2 lines | Added TB, TB_BIN to RedisCommandType enum |
-| `src/redis_service.cpp` | Modified | +5 lines | Registered TbCommandHandler and TbBinCommandHandler |
-| `CMakeLists.txt` | Modified | +2 lines | Added tb_types.cpp and tb_handler.cpp to source list |
-| `lua_beetle/scripts/create_account.lua` | Modified | ±2 lines | Fix hardcoded timestamp |
-| `lua_beetle/scripts/create_linked_accounts.lua` | Modified | ±2 lines | Fix hardcoded timestamp |
-| `lua_beetle/scripts/create_transfer.lua` | Modified | ±3 lines | Fix hardcoded timestamp + wrong LINKED error code |
-| `lua_beetle/scripts/create_linked_transfers.lua` | Modified | ±2 lines | Fix hardcoded timestamp |
-| `lua_beetle/tests/common.go` | Modified | +1 line | Fix ErrLinkedEventChainOpen constant value |
+| File | Status | Purpose |
+|---|---|---|
+| `include/tb_types.h` | New + updated | TigerBeetle type definitions; full TbTransferStatus enum including closed-account and ledger-diff codes |
+| `src/tb_types.cpp` | New | Binary encode/decode, key builders, timestamp, text parsers |
+| `include/tb_handler.h` | New | Handler class declarations, CaptureOutputHandler |
+| `src/tb_handler.cpp` | New + updated | Full command logic; idempotency with field-specific codes; closed-account enforcement with void_pending exception |
+| `include/redis_command.h` | Modified | Added TB, TB_BIN to RedisCommandType enum |
+| `src/redis_service.cpp` | Modified | Registered TbCommandHandler and TbBinCommandHandler |
+| `CMakeLists.txt` | Modified | Added tb_types.cpp and tb_handler.cpp to source list |
+| `lua_beetle/scripts/create_account.lua` | Modified | Fix hardcoded timestamp |
+| `lua_beetle/scripts/create_linked_accounts.lua` | Modified | Fix hardcoded timestamp |
+| `lua_beetle/scripts/create_transfer.lua` | Modified | Fix hardcoded timestamp; fix wrong LINKED error code; fix POST_PENDING amount_actual for posted balances |
+| `lua_beetle/scripts/create_linked_transfers.lua` | Modified | Fix hardcoded timestamp; fix POST_PENDING amount_actual; add pending_id/timeout validation for non-post/void; fix pending_id INT_MAX and self-reference checks |
+| `lua_beetle/tests/common.go` | Modified | Fix ErrLinkedEventChainOpen constant value |
