@@ -398,6 +398,11 @@ static TbTransferStatus tb_do_create_transfer(RedisServiceImpl *redis_impl,
         if (!tb_decode_transfer(pending_get.str_val, pending_txfr))
             return TbTransferStatus::PENDING_TRANSFER_NOT_FOUND;
 
+        // Check if already resolved (posted or voided)
+        if (pending_txfr.has_flag(TransferFlags::POST_PENDING))
+            return TbTransferStatus::PENDING_TRANSFER_ALREADY_POSTED;
+        if (pending_txfr.has_flag(TransferFlags::VOID_PENDING))
+            return TbTransferStatus::PENDING_TRANSFER_ALREADY_VOIDED;
         if (!pending_txfr.has_flag(TransferFlags::PENDING))
             return TbTransferStatus::PENDING_TRANSFER_NOT_PENDING;
         if (pending_txfr.debit_account_id != txfr.debit_account_id)
@@ -449,6 +454,24 @@ static TbTransferStatus tb_do_create_transfer(RedisServiceImpl *redis_impl,
 
             debit_acc.debits_pending = debit_acc.debits_pending - amount;
             credit_acc.credits_pending = credit_acc.credits_pending - amount;
+        }
+
+        // Mark the pending transfer as resolved so that future POST/VOID
+        // attempts return the correct ALREADY_POSTED / ALREADY_VOIDED codes
+        // instead of falling through to the balance-arithmetic checks.
+        pending_txfr.flags &= ~static_cast<uint16_t>(TransferFlags::PENDING);
+        pending_txfr.flags |= static_cast<uint16_t>(
+            is_post ? TransferFlags::POST_PENDING : TransferFlags::VOID_PENDING);
+        {
+            std::string p_key = tb_transfer_key(txfr.pending_id);
+            std::string p_enc = tb_encode_transfer(pending_txfr);
+            auto set_p = tb_run_cmd(redis_impl, ctx, txm, {"set", p_key, p_enc});
+            if (set_p.has_error)
+            {
+                LOG(WARNING) << "TB create_transfer SET pending update error: "
+                             << set_p.error_msg;
+                return TbTransferStatus::EXISTS;
+            }
         }
     }
     else if (is_pending)
@@ -613,22 +636,17 @@ static void tb_exec_create_accounts(
     size_t i = 0;
     while (i < n)
     {
-        // Find chain end
+        // Find chain end: advance while items have LINKED flag, then include
+        // the one terminating item (without LINKED).  If the array ends while
+        // still inside a LINKED sequence the chain is open (error).
         size_t chain_start = i;
-        size_t chain_end = i;
-        while (chain_end < n &&
-               (accounts[chain_end].has_flag(AccountFlags::LINKED) ||
-                chain_end == chain_start))
-        {
-            if (!accounts[chain_end].has_flag(AccountFlags::LINKED) &&
-                chain_end > chain_start)
-                break;
+        size_t chain_end = chain_start;
+        while (chain_end < n && accounts[chain_end].has_flag(AccountFlags::LINKED))
             chain_end++;
-            if (chain_end >= n || !accounts[chain_end - 1].has_flag(AccountFlags::LINKED))
-                break;
-        }
+        if (chain_end < n)
+            chain_end++;  // include the non-LINKED terminating item
 
-        // Check for open chain: last account in range still has LINKED set
+        // Check for open chain: ran off the end while still in a LINKED run
         bool chain_open = (chain_end == n && chain_end > chain_start &&
                            accounts[chain_end - 1].has_flag(AccountFlags::LINKED));
         if (chain_open)
@@ -753,19 +771,11 @@ static void tb_exec_create_transfers(
     while (i < n)
     {
         size_t chain_start = i;
-        size_t chain_end = i;
-        while (chain_end < n &&
-               (transfers[chain_end].has_flag(TransferFlags::LINKED) ||
-                chain_end == chain_start))
-        {
-            if (!transfers[chain_end].has_flag(TransferFlags::LINKED) &&
-                chain_end > chain_start)
-                break;
+        size_t chain_end = chain_start;
+        while (chain_end < n && transfers[chain_end].has_flag(TransferFlags::LINKED))
             chain_end++;
-            if (chain_end >= n ||
-                !transfers[chain_end - 1].has_flag(TransferFlags::LINKED))
-                break;
-        }
+        if (chain_end < n)
+            chain_end++;  // include the non-LINKED terminating item
 
         bool chain_open =
             (chain_end == n && chain_end > chain_start &&
